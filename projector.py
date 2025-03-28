@@ -14,30 +14,10 @@ class Projector:
             self.label = ip
 
         self.power = None
-        self.screen_format = None
-        self.input = None
         self.group = False
         self.shutter = None
         self.shutter_in_time = None
         self.shutter_out_time = None
-
-        self.screen_dict = {
-            '0': '16:10',
-            '1': '16:9',
-            '2': '4:3'
-        }
-        self.input_dict = {
-            'RG1': 'COMPUTER1',
-            'RG2': 'COMPUTER2',
-            'VID': 'VIDEO',
-            'SVD': 'Y/C',
-            'DVI': 'DVI',
-            'HD1': 'HDMI',
-            'SD1': 'SDI',
-            'DL1:HD1': 'Digital Link HD1',
-            'DL1:HD2': 'Digital Link HD2',
-        }
-
         self.shutter_time_dict = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5,
                                   3.0, 3.5, 4.0, 5.0, 7.0, 10.0]
 
@@ -74,21 +54,17 @@ class Projector:
             self.shutter = shutter == '0'
         else:
             self.power = False
-        self.input = self.input_dict[await self.send_cmd('QIN')]
+            self.shutter = False
+
         get_shutter_in = await self.send_cmd('QVX:SEFS1')
         answer_shutter_in_time = get_shutter_in.split('=')
         self.shutter_in_time = answer_shutter_in_time[1] if (
             len(answer_shutter_in_time) > 1) else 'None'
+
         get_shutter_out = await self.send_cmd('QVX:SEFS2')
         answer_shutter_out_time = get_shutter_out.split('=')
         self.shutter_out_time = answer_shutter_out_time[1] if (
             len(answer_shutter_out_time) > 1) else 'None'
-            
-        srn_frmt_answr = await self.send_cmd('QSF')
-        if srn_frmt_answr in self.screen_dict.keys():
-            self.screen_format = self.screen_dict[srn_frmt_answr]
-        else:
-            self.screen_format = 'None'
 
     async def power_on(self):
         await self.send_cmd('PON')
@@ -110,16 +86,6 @@ class Projector:
     async def shutter_out(self, shutter_time):
         await self.send_cmd(f'VXX:SEFS2={shutter_time}')
 
-    async def set_screen_format(self, screen_format):
-        for key, val in self.screen_dict.items():
-            if val == screen_format:
-                await self.send_cmd(f'VSF:{key}')
-
-    async def set_input_source(self, input_source):
-        for key, val in self.input_dict.items():
-            if val == input_source:
-                await self.send_cmd(f'IIS:{key}')
-
     def debug_info(self):
         print(
             f'''
@@ -130,8 +96,6 @@ class Projector:
     LABEL-----{self.label}
     ID--------{self.id}
     POWER-----{self.power}
-    SCREEN_F__{self.screen_format}
-    INPUR SRC-{self.input}
     GROUP-----{self.group}
     SHUTTER---{self.shutter}
     SHUTTER_IN---{self.shutter_in_time}
