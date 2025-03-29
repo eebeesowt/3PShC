@@ -3,6 +3,7 @@ from tkinter import (Tk,
                      Toplevel, Button, Checkbutton,
                      Label, Entry, filedialog)
 import asyncio
+from tkinter import ttk  # Для выпадающих списков
 # from typing import List   # create_projector
 from projector import Projector
 
@@ -69,6 +70,34 @@ class ProjectorFrame:
             foreground="white"
         )
 
+        # Выпадающие списки для времени шаттера
+
+        if self.projector.shutter_in_time is not None:
+            self.shutter_in_menu = ttk.Combobox(
+                self.frame,
+                values=self.projector.shutter_time_dict,
+                state="readonly",
+                width=5
+            )
+            self.shutter_in_menu.set(self.projector.shutter_in_time)
+            self.shutter_in_menu.bind(
+                "<<ComboboxSelected>>", self.set_shutter_in
+            )
+            self.shutter_in_menu.grid(row=2, column=0, pady=2)
+
+        if self.projector.shutter_out_time is not None:
+            self.shutter_out_menu = ttk.Combobox(
+                self.frame,
+                values=self.projector.shutter_time_dict,
+                state="readonly",
+                width=5
+            )
+            self.shutter_out_menu.set(self.projector.shutter_out_time)
+            self.shutter_out_menu.bind(
+                "<<ComboboxSelected>>", self.set_shutter_out
+            )
+            self.shutter_out_menu.grid(row=2, column=1, pady=2)
+
         # Расположение
         self.label.grid(row=0, column=0, columnspan=2, pady=2)
         self.group.grid(row=0, column=2, pady=2)
@@ -115,6 +144,22 @@ class ProjectorFrame:
             self.screen_status['background'] = (
                 'green' if self.projector.shutter else 'red'
             )
+
+    def set_shutter_in(self, event):
+        selected_time = self.shutter_in_menu.get()
+        try:
+            asyncio.run(self.projector.set_shutter_in(selected_time))
+            print(f"Shutter In Time set to {selected_time}")
+        except Exception as e:
+            print(f"Error setting Shutter In Time: {e}")
+
+    def set_shutter_out(self, event):
+        selected_time = self.shutter_out_menu.get()
+        try:
+            asyncio.run(self.projector.set_shutter_out(selected_time))
+            print(f"Shutter Out Time set to {selected_time}")
+        except Exception as e:
+            print(f"Error setting Shutter Out Time: {e}")
 
     def close_frame(self):
         self.frame.destroy()
