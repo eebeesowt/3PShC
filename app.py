@@ -8,18 +8,6 @@ from tkinter import ttk  # Для выпадающих списков
 from lib.projector import Projector
 
 
-# async def get_on_projectors():
-#     projectors: List[Projector] = []
-#     for projector in projector_list:
-#         try:
-#             proj = await create_projector(*projector, len(projectors))
-#             if proj.power is not None:
-#                 projectors.append(proj)
-#         except Exception as e:
-#             print(f'No connection to projector {projector[0]}: {e}')
-#     return projectors
-
-
 class ProjectorFrame:
     def __init__(self, projector: Projector, parent, remove_callback) -> None:
         self.projector = projector
@@ -349,7 +337,7 @@ class MainFrame:
                             label=label,
                             id=len(self.active_frame) + 1,
                         )
-                    except ValueError as e:
+                    except Exception as e:
                         print("Error creating projector:")
                         print(f"  ip: {ip}")
                         print(f"  Error: {e}")
