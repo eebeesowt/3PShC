@@ -340,14 +340,21 @@ class MainFrame:
                     y = int(y)
 
                     # Создание нового проектора
-                    new_projector = Projector(
-                        ip=ip,
-                        port=port,
-                        login=username,
-                        password=password,
-                        label=label,
-                        id=len(self.active_frame) + 1,
-                    )
+                    try:
+                        new_projector = Projector(
+                            ip=ip,
+                            port=port,
+                            login=username,
+                            password=password,
+                            label=label,
+                            id=len(self.active_frame) + 1,
+                        )
+                    except ValueError as e:
+                        print("Error creating projector:")
+                        print(f"  ip: {ip}")
+                        print(f"  Error: {e}")
+                        continue
+                    # Создание фрейма для нового проектора
                     frame = ProjectorFrame(
                         new_projector, self.canvas, self.remove_frame
                     )
@@ -356,7 +363,7 @@ class MainFrame:
                     self.active_frame.append(frame)
                     frame.frame.place(x=x, y=y)
 
-            print("Projectors and window size loaded successfully.")
+            print("Window size loaded successfully.")
         except Exception as e:
             print(f"Error while loading projectors: {e}")
 

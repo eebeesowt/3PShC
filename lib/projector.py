@@ -20,6 +20,8 @@ class Projector:
         self.shutter_out_time = 0.0
         self.shutter_time_dict = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5,
                                   3.0, 3.5, 4.0, 5.0, 7.0, 10.0]
+        if not asyncio.run(self.get_info()):
+            raise ValueError('Error getting projector info')
 
     async def send_cmd(self, cmd, timeout=5):
         reader, writer = await asyncio.open_connection(self.ip,
@@ -52,9 +54,10 @@ class Projector:
             self.power = True
             shutter = await self.send_cmd('QSH')
             self.shutter = shutter == '0'
-        else:
+        elif power == '000':
             self.power = False
-            self.shutter = False
+        else:
+            raise ValueError('Unknown power state')
 
         get_shutter_in = await self.send_cmd('QVX:SEFS1')
         answer_shutter_in_time = get_shutter_in.split('=')
@@ -102,13 +105,3 @@ class Projector:
     SHUTTER_OUT---{self.shutter_out_time}
         '''
         )
-
-
-async def create_projector(ip, port, login, password, label, id):
-    projector = Projector(ip, port, login, password, label, id)
-    try:
-        await projector.get_info()
-    except Exception as e:
-        print(f'Error getting info for projector {ip}: {e}')
-        return None
-    return projector

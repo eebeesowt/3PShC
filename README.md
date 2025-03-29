@@ -13,3 +13,5 @@ IP,PORT,USERNAME,PASSWORD,LABEL,X,Y
 IP,PORT,USERNAME,PASSWORD,LABEL,X,Y
 ...
 ```
+
+dist/app - собранное приложение
