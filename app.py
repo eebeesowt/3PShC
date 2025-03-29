@@ -5,7 +5,7 @@ from tkinter import (Tk,
 import asyncio
 from tkinter import ttk  # Для выпадающих списков
 # from typing import List   # create_projector
-from projector import Projector
+from lib.projector import Projector
 
 
 # async def get_on_projectors():
