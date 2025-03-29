@@ -1,27 +1,22 @@
-from tkinter import ttk
-from tkinter import Tk, IntVar, Frame, Toplevel, Button, Checkbutton
+from tkinter import (Tk,
+                     IntVar, Frame,
+                     Toplevel, Button, Checkbutton,
+                     Label, Entry, filedialog)
 import asyncio
-from typing import List
-from projector import create_projector, Projector
-
-projector_list = [
-    ('10.101.10.132', 1024, 'admin1', 'panasonic', 'LEFT'),
-    ('10.101.10.131', 1024, 'admin1', 'panasonic', 'RIGHT'),
-    ('10.101.10.123', 1024, 'admin1', 'panasonic', 'FRONT'),
-    ('10.101.10.121', 1024, 'admin1', 'panasonic', 'BACK'),
-]
+# from typing import List   # create_projector
+from projector import Projector
 
 
-async def get_on_projectors():
-    projectors: List[Projector] = []
-    for projector in projector_list:
-        try:
-            proj = await create_projector(*projector, len(projectors))
-            if proj.power is not None:
-                projectors.append(proj)
-        except Exception as e:
-            print(f'No connection to projector {projector[0]}: {e}')
-    return projectors
+# async def get_on_projectors():
+#     projectors: List[Projector] = []
+#     for projector in projector_list:
+#         try:
+#             proj = await create_projector(*projector, len(projectors))
+#             if proj.power is not None:
+#                 projectors.append(proj)
+#         except Exception as e:
+#             print(f'No connection to projector {projector[0]}: {e}')
+#     return projectors
 
 
 class ProjectorFrame:
@@ -37,7 +32,7 @@ class ProjectorFrame:
             relief='solid',
             background="#363537"
         )
-        self.label = ttk.Label(
+        self.label = Label(
             self.frame,
             text=projector.label,
             font=("Helvetica", 12, "bold"),
@@ -67,7 +62,7 @@ class ProjectorFrame:
             fg="white", width=1, height=1, highlightthickness=0
         )
         self.bg_status_color = 'green' if self.projector.shutter else 'red'
-        self.screen_status = ttk.Label(
+        self.screen_status = Label(
             self.frame,
             text=self.get_screen_status(),
             background=self.bg_status_color,
@@ -140,7 +135,7 @@ class MainFrame:
         # Создание окна
         self.root = Tk()
         self.root.title("3P Shutter Control")
-        self.root.geometry("600x400")
+        self.root.geometry("466x400")  # Размер окна по умолчанию
         self.root.configure(background="#363537")
 
         # Верхняя панель с кнопками
@@ -151,7 +146,7 @@ class MainFrame:
         self.all_shutter_on_btn = Button(
             self.button_frame,
             text='Open Group',
-            command=self.opn_async_grp_shtr,  # noqa: E501
+            command=self.opn_async_grp_shtr,
             bg="#04A777",
             fg="white",
             highlightthickness=0
@@ -168,8 +163,8 @@ class MainFrame:
             self.button_frame,
             text='Update',
             command=self.update,
-            bg="#83B5D1",
-            fg="white",
+            bg="#FFDBB5",
+            fg="black",
             width=10,
             highlightthickness=0
         )
@@ -177,17 +172,44 @@ class MainFrame:
             self.button_frame,
             text='Add Projector',
             command=self.open_add_projector_window,
-            bg="#D9CAB3",
+            bg="#71A9F7",
             fg="white",
             width=12,
             highlightthickness=0
         )
+        self.load_projectors_btn = Button(
+            self.button_frame,
+            text='Load from File',
+            command=self.load_projectors_from_file,
+            bg="#729B79",
+            fg="white",
+            width=15,
+            highlightthickness=0
+        )
+        self.save_projectors_btn = Button(
+            self.button_frame,
+            text='Save to File',
+            command=self.save_projectors_to_file,
+            bg="#14453D",
+            fg="white",
+            width=15,
+            highlightthickness=0
+        )
 
         # Расположение кнопок
-        self.all_shutter_on_btn.grid(row=0, column=0, ipadx=7, ipady=7)
-        self.all_shutter_off_btn.grid(row=0, column=1, ipadx=7, ipady=7)
-        self.update_btn.grid(row=0, column=2, padx=5, pady=2)
-        self.add_projector_btn.grid(row=0, column=3, padx=5, pady=2)
+        self.all_shutter_on_btn.grid(
+            row=1, column=0,
+            ipadx=7, ipady=7,
+            pady=10
+        )
+        self.all_shutter_off_btn.grid(
+            row=1, column=1, ipadx=7, ipady=7, pady=10
+        )
+        self.update_btn.grid(row=1, column=2, padx=5, pady=10)
+
+        self.add_projector_btn.grid(row=0, column=0, padx=5, pady=2)
+        self.load_projectors_btn.grid(row=0, column=1, padx=5, pady=2)
+        self.save_projectors_btn.grid(row=0, column=2, padx=5, pady=2)
 
         # Область для перемещения фреймов проекторов
         self.canvas = Frame(
@@ -236,6 +258,104 @@ class MainFrame:
     def update(self):
         print("Update clicked")
 
+    def load_projectors_from_file(self):
+        """
+        Загружает проекторы, их координаты и размер окна из файла.
+        """
+        file_path = filedialog.askopenfilename(
+            title="Select Projectors File",
+            filetypes=(("Text Files", "*.txt"), ("All Files", "*.*"))
+        )
+
+        if not file_path:
+            print("No file selected.")
+            return
+
+        try:
+            with open(file_path, "r") as file:
+                lines = file.readlines()
+
+                # Загружаем размер окна из первой строки
+                if len(lines) > 0:
+                    width, height = map(int, lines[0].strip().split(","))
+                    self.root.geometry(f"{width}x{height}")
+
+                # Загружаем проекторы из оставшихся строк
+                for line in lines[1:]:
+                    # Ожидаемый формат строки:
+                    # IP,PORT,USERNAME,PASSWORD,LABEL,X,Y
+                    parts = line.strip().split(",")
+                    if len(parts) != 7:
+                        print(f"Invalid line format: {line}")
+                        continue
+
+                    ip, port, username, password, label, x, y = parts
+                    port = int(port)
+                    x = int(x)
+                    y = int(y)
+
+                    # Создание нового проектора
+                    new_projector = Projector(
+                        ip=ip,
+                        port=port,
+                        login=username,
+                        password=password,
+                        label=label,
+                        id=len(self.active_frame) + 1,
+                    )
+                    frame = ProjectorFrame(
+                        new_projector, self.canvas, self.remove_frame
+                    )
+
+                    # Расположение фрейма на основе координат
+                    self.active_frame.append(frame)
+                    frame.frame.place(x=x, y=y)
+
+            print("Projectors and window size loaded successfully.")
+        except Exception as e:
+            print(f"Error while loading projectors: {e}")
+
+    def save_projectors_to_file(self):
+        """
+        Сохраняет активные проекторы, их координаты и размер окна в файл.
+        """
+        file_path = filedialog.asksaveasfilename(
+            title="Save Projectors File",
+            defaultextension=".txt",
+            filetypes=(("Text Files", "*.txt"), ("All Files", "*.*"))
+        )
+
+        if not file_path:
+            print("No file selected for saving.")
+            return
+
+        try:
+            with open(file_path, "w") as file:
+                # Сохраняем размер окна
+                width = self.root.winfo_width()
+                height = self.root.winfo_height()
+                file.write(f"{width},{height}\n")
+
+                # Сохраняем данные проекторов
+                for frame in self.active_frame:
+                    projector = frame.projector
+                    x = frame.frame.winfo_x()
+                    y = frame.frame.winfo_y()
+                    # Сохраняем данные проектора и координаты в формате:
+                    # IP,PORT,USERNAME,PASSWORD,LABEL,X,Y
+                    file.write(
+                        f"{projector.ip},{projector.port},{projector.login},"
+                        f"{projector.password},{projector.label},{x},{y}\n"
+                    )
+            print(
+                (
+                    f"Projectors, positions, and window size"
+                    f"saved successfully to {file_path}."
+                )
+            )
+        except Exception as e:
+            print(f"Error while saving projectors: {e}")
+
     def open_add_projector_window(self):
         # Создание нового окна
         add_window = Toplevel(self.root)
@@ -243,37 +363,37 @@ class MainFrame:
         add_window.geometry("300x250")
 
         # Поля для ввода параметров
-        ttk.Label(
+        Label(
             add_window, text="IP Address:"
         ).grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        ip_entry = ttk.Entry(add_window)
+        ip_entry = Entry(add_window)
         ip_entry.grid(row=0, column=1, padx=10, pady=5)
 
-        ttk.Label(
+        Label(
             add_window, text="Port:"
         ).grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        port_entry = ttk.Entry(add_window)
+        port_entry = Entry(add_window)
         port_entry.grid(row=1, column=1, padx=10, pady=5)
 
-        ttk.Label(
+        Label(
             add_window, text="Username:"
         ).grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        username_entry = ttk.Entry(add_window)
+        username_entry = Entry(add_window)
         username_entry.grid(
             row=2, column=1, padx=10, pady=5
         )
-        ttk.Label(
+        Label(
             add_window, text="Password:"
         ).grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        password_entry = ttk.Entry(add_window, show="*")
+        password_entry = Entry(add_window, show="*")
         password_entry.grid(
             row=3, column=1, padx=10, pady=5
         )
 
-        ttk.Label(
+        Label(
             add_window, text="Label:"
         ).grid(row=4, column=0, padx=10, pady=5, sticky="w")
-        label_entry = ttk.Entry(add_window)
+        label_entry = Entry(add_window)
         label_entry.grid(row=4, column=1, padx=10, pady=5)
 
         # Кнопка для добавления проектора
@@ -307,7 +427,7 @@ class MainFrame:
             # Закрытие окна после добавления
             add_window.destroy()
 
-        add_button = ttk.Button(add_window, text="Add", command=add_projector)
+        add_button = Button(add_window, text="Add", command=add_projector)
         add_button.grid(row=5, column=0, columnspan=2, pady=10)
 
     def add_frames(self, projectors):
@@ -332,9 +452,5 @@ class MainFrame:
         self.root.mainloop()
 
 
-projectors = asyncio.run(get_on_projectors())
-
 main = MainFrame()
-if len(projectors) > 0:
-    main.add_frames(projectors)
 main.start()

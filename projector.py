@@ -80,10 +80,10 @@ class Projector:
         await self.send_cmd('OSH:1')
         self.shutter = False
 
-    async def shutter_in(self, shutter_time):
+    async def set_shutter_in(self, shutter_time):
         await self.send_cmd(f'VXX:SEFS1={shutter_time}')
 
-    async def shutter_out(self, shutter_time):
+    async def set_shutter_out(self, shutter_time):
         await self.send_cmd(f'VXX:SEFS2={shutter_time}')
 
     def debug_info(self):
