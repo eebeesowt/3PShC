@@ -7,6 +7,20 @@ from tkinter import ttk  # Для выпадающих списков
 # from typing import List   # create_projector
 from lib.projector import Projector
 
+from pythonosc.osc_server import AsyncIOOSCUDPServer
+from pythonosc.dispatcher import Dispatcher
+
+
+def shutter_open_handler(address, *args):
+    print(f"{address}: {args}")
+
+
+dispatcher = Dispatcher()
+dispatcher.map("/filter", shutter_open_handler)
+
+ip = '127.0.0.1'
+port = 7001
+
 
 class ProjectorFrame:
     def __init__(self, projector: Projector, parent, remove_callback) -> None:
@@ -32,7 +46,7 @@ class ProjectorFrame:
             self.frame,
             text='On',
             command=self.shutter_open,
-            bg="#04A777",
+            bg="#C1EF25",
             fg="white", width=5, highlightthickness=0
         )
         self.shutter_off_btn = Button(
@@ -492,5 +506,23 @@ class MainFrame:
         self.root.mainloop()
 
 
-main = MainFrame()
-main.start()
+async def progloop():
+    main = MainFrame()
+    await main.start()
+
+
+async def init_main():
+    server = AsyncIOOSCUDPServer(
+        (ip, port),
+        dispatcher,
+        asyncio.get_event_loop()
+        )
+    transport, protocol = await server.create_serve_endpoint()
+
+    await progloop()
+
+    transport.close()
+
+
+asyncio.run(init_main())
+print('?')

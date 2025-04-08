@@ -20,10 +20,10 @@ class Projector:
         self.shutter_out_time = 0.0
         self.shutter_time_dict = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5,
                                   3.0, 3.5, 4.0, 5.0, 7.0, 10.0]
-        try:
-            asyncio.run(self.get_info())
-        except Exception as exc:
-            raise exc
+        # try:
+        #     asyncio.run(self.get_info())
+        # except Exception as exc:
+        #     raise exc
 
     async def send_cmd(self, cmd, timeout=2):
         try:
