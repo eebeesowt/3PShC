@@ -5,6 +5,7 @@ import asyncio
 class Projector:
     def __init__(self, ip, port, login, password, label, id) -> None:
         self.ip = ip
+        self.ip_room_nomber = ip.split('.')[-1]
         self.port = port
         self.login = login
         self.password = password
@@ -16,14 +17,14 @@ class Projector:
         self.power = None
         self.group = False
         self.shutter = None
-        self.shutter_in_time = 0.0
-        self.shutter_out_time = 0.0
+        self.shutter_in_time = None
+        self.shutter_out_time = None
         self.shutter_time_dict = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5,
                                   3.0, 3.5, 4.0, 5.0, 7.0, 10.0]
-        # try:
-        #     asyncio.run(self.get_info())
-        # except Exception as exc:
-        #     raise exc
+        try:
+            asyncio.run(self.get_info())
+        except Exception as exc:
+            raise exc
 
     async def send_cmd(self, cmd, timeout=2):
         try:

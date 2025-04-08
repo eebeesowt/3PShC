@@ -11,17 +11,6 @@ from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
 
 
-def shutter_open_handler(address, *args):
-    print(f"{address}: {args}")
-
-
-dispatcher = Dispatcher()
-dispatcher.map("/filter", shutter_open_handler)
-
-ip = '127.0.0.1'
-port = 7001
-
-
 class ProjectorFrame:
     def __init__(self, projector: Projector, parent, remove_callback) -> None:
         self.projector = projector
@@ -44,14 +33,17 @@ class ProjectorFrame:
         )
         self.shutter_on_btn = Button(
             self.frame,
-            text='On',
-            command=self.shutter_open,
+            text='Open',
+            command=self.wrapper_shutter_open,
             bg="#C1EF25",
             fg="white", width=5, highlightthickness=0
         )
         self.shutter_off_btn = Button(
-            self.frame, text='Off', command=self.shutter_close,
-            bg="#DC758F", fg="white", width=5, highlightthickness=0
+            self.frame,
+            text='Close',
+            command=self.wrapper_shutter_close,
+            bg="#DC758F",
+            fg="white", width=5, highlightthickness=0
         )
         self.group = Checkbutton(
             self.frame,
@@ -71,7 +63,6 @@ class ProjectorFrame:
             background=self.bg_status_color,
             foreground="white"
         )
-
         # Выпадающие списки для времени шаттера
 
         if self.projector.shutter_in_time is not None:
@@ -115,11 +106,11 @@ class ProjectorFrame:
         self._drag_data = {"x": 0, "y": 0}
 
     def get_screen_status(self):
-        return f'{"ON" if self.projector.shutter else "OFF"}'
+        return f'{"Open" if self.projector.shutter else "Closed"}'
 
-    def shutter_open(self):
+    async def shutter_open(self):
         try:
-            asyncio.run(self.projector.shutter_open())
+            await self.projector.shutter_open()
         except TimeoutError:
             print(
                 "Error: Timeout while opening shutter"
@@ -133,24 +124,31 @@ class ProjectorFrame:
                 'green' if self.projector.shutter else 'red'
             )
 
-    def shutter_close(self):
+    async def shutter_close(self):
         try:
-            asyncio.run(self.projector.shutter_close())
+            await self.projector.shutter_close()
         except TimeoutError:
             print("Error: Timeout while closing shutter")
             self.screen_status['background'] = '#000000'
             self.screen_status['foreground'] = '#ffffff'
             self.screen_status['text'] = 'Error'
         else:
+            print(self.get_screen_status())
             self.screen_status['text'] = self.get_screen_status()
             self.screen_status['background'] = (
                 'green' if self.projector.shutter else 'red'
             )
 
+    def wrapper_shutter_close(self):
+        asyncio.create_task(self.shutter_close())
+
+    def wrapper_shutter_open(self):
+        asyncio.create_task(self.shutter_open())
+
     def set_shutter_in(self, event):
         selected_time = self.shutter_in_menu.get()
         try:
-            asyncio.run(self.projector.set_shutter_in(selected_time))
+            asyncio.create_task(self.projector.set_shutter_in(selected_time))
             print(f"Shutter In Time set to {selected_time}")
         except Exception as e:
             print(f"Error setting Shutter In Time: {e}")
@@ -158,7 +156,7 @@ class ProjectorFrame:
     def set_shutter_out(self, event):
         selected_time = self.shutter_out_menu.get()
         try:
-            asyncio.run(self.projector.set_shutter_out(selected_time))
+            asyncio.create_task(self.projector.set_shutter_out(selected_time))
             print(f"Shutter Out Time set to {selected_time}")
         except Exception as e:
             print(f"Error setting Shutter Out Time: {e}")
@@ -179,11 +177,32 @@ class ProjectorFrame:
 
 class MainFrame:
     def __init__(self) -> None:
+
+        self.dispatcher = Dispatcher()
+        self.dispatcher.map(
+            "/shutter/open*",
+            self.shutter_open_handler
+            )
+        self.dispatcher.map(
+            "/shutter/close*",
+            self.shutter_close_handler
+            )
+        self.dispatcher.map(
+            "/shutter/group/open",
+            self.shutter_group_open_handler
+            )
+        self.dispatcher.map(
+            "/shutter/group/close",
+            self.shutter_group_close_handler
+            )
+        self.oscServer = None
+
         # Создание окна
         self.root = Tk()
         self.root.title("3P Shutter Control")
         self.root.geometry("466x400")  # Размер окна по умолчанию
         self.root.configure(background="#363537")
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         # Верхняя панель с кнопками
         self.button_frame = Frame(self.root, background="#363537")
@@ -209,7 +228,7 @@ class MainFrame:
         self.update_btn = Button(
             self.button_frame,
             text='Update',
-            command=self.update,
+            command=self.wrapper_update,
             bg="#FFDBB5",
             fg="black",
             width=10,
@@ -270,6 +289,32 @@ class MainFrame:
         # Вспомогательные переменные
         self.active_frame = []
 
+    async def setup_osc(self):
+        loop = asyncio.get_running_loop()
+        self.oscServer = AsyncIOOSCUDPServer(
+            ('127.0.0.1', 7001),
+            self.dispatcher,
+            loop
+        )
+
+    def shutter_open_handler(self, address, *args):
+        projector = address.split('/')[-1]
+        if args[0] == 3:
+            print(f'clikc {projector}')
+            for frame in self.active_frame:
+                if frame.projector.ip_room_nomber == projector:
+                    asyncio.create_task(frame.shutter_open())
+                    break
+
+    def shutter_close_handler(self, address, *args):
+        projector = address.split('/')[-1]
+        if args[0] == 3:
+            print(f'clikc {projector}')
+            for frame in self.active_frame:
+                if frame.projector.ip_room_nomber == projector:
+                    asyncio.create_task(frame.shutter_close())
+                    break
+
     async def close_group_shutter(self):
         tasks = []
         for frame in self.active_frame:
@@ -277,14 +322,14 @@ class MainFrame:
                 task = asyncio.create_task(frame.projector.shutter_close())
                 tasks.append(task)
         await asyncio.gather(*tasks)
-
-    def cls_async_grp_shtr(self):
-        asyncio.run(self.close_group_shutter())
         for frame in self.active_frame:
             frame.screen_status['background'] = (
                 'green' if frame.projector.shutter else 'red'
             )
             frame.screen_status['text'] = frame.get_screen_status()
+
+    def cls_async_grp_shtr(self):
+        asyncio.create_task(self.close_group_shutter())
 
     async def open_group_shutter(self):
         tasks = []
@@ -293,17 +338,42 @@ class MainFrame:
                 task = asyncio.create_task(frame.projector.shutter_open())
                 tasks.append(task)
         await asyncio.gather(*tasks)
-
-    def opn_async_grp_shtr(self):
-        asyncio.run(self.open_group_shutter())
         for frame in self.active_frame:
             frame.screen_status['background'] = (
                 'green' if frame.projector.shutter else 'red'
             )
             frame.screen_status['text'] = frame.get_screen_status()
 
-    def update(self):
-        print("Update clicked")
+    def opn_async_grp_shtr(self):
+        asyncio.create_task(self.open_group_shutter())
+
+    def shutter_group_open_handler(self, address, *args):
+        if args[0] == 3:
+            self.opn_async_grp_shtr()
+
+    def shutter_group_close_handler(self, address, *args):
+        if args[0] == 3:
+            self.cls_async_grp_shtr()
+
+    async def update(self):
+        for frame in self.active_frame:
+            try:
+                await frame.projector.get_info()
+            except Exception as e:
+                print(f"Error updating projector {frame.projector.label}: {e}")
+        for frame in self.active_frame:
+            frame.screen_status['background'] = (
+                'green' if frame.projector.shutter else 'red'
+            )
+            frame.screen_status['text'] = frame.get_screen_status()
+
+    def wrapper_update(self):
+        asyncio.create_task(self.update())
+
+    def on_close(self):
+        # Здесь можно добавить логику завершения или очистки
+        print("Закрытие MainFrame...")
+        self.root.destroy()
 
     def load_projectors_from_file(self):
         """
@@ -502,27 +572,19 @@ class MainFrame:
         if frame in self.active_frame:
             self.active_frame.remove(frame)
 
-    def start(self):
-        self.root.mainloop()
+    async def run_server(self):
+        await self.setup_osc()
+        transport, protocol = await self.oscServer.create_serve_endpoint()
+        try:
+            while True:
+                if not self.root.winfo_exists():
+                    break
+                self.root.update()
+                await asyncio.sleep(0.01)
+        finally:
+            transport.close()
 
 
-async def progloop():
+if __name__ == "__main__":
     main = MainFrame()
-    await main.start()
-
-
-async def init_main():
-    server = AsyncIOOSCUDPServer(
-        (ip, port),
-        dispatcher,
-        asyncio.get_event_loop()
-        )
-    transport, protocol = await server.create_serve_endpoint()
-
-    await progloop()
-
-    transport.close()
-
-
-asyncio.run(init_main())
-print('?')
+    asyncio.run(main.run_server())
