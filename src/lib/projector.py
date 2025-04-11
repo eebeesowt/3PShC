@@ -21,10 +21,12 @@ class Projector:
         self.shutter_out_time = None
         self.shutter_time_dict = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5,
                                   3.0, 3.5, 4.0, 5.0, 7.0, 10.0]
-        try:
-            asyncio.run(self.get_info())
-        except Exception as exc:
-            raise exc
+        self.SHUTTER_OPEN = False
+        self.SHUTER_CLOSED = True
+        # try:
+        #     asyncio.run(self.get_info())
+        # except Exception as exc:
+        #     raise exc
 
     async def send_cmd(self, cmd, timeout=2):
         try:
@@ -61,7 +63,10 @@ class Projector:
         if power == '001':
             self.power = True
             shutter = await self.send_cmd('QSH')
-            self.shutter = shutter == '0'
+            if shutter == '0':
+                self.shutter = self.SHUTTER_OPEN
+            elif shutter == '1':
+                self.shutter = self.SHUTER_CLOSED
         elif power == '000':
             self.power = False
         else:
@@ -80,17 +85,19 @@ class Projector:
 
     async def power_on(self):
         await self.send_cmd('PON')
+        self.power = True
 
     async def power_off(self):
         await self.send_cmd('POF')
+        self.power = False
 
     async def shutter_open(self):
         await self.send_cmd('OSH:0')
-        self.shutter = True
+        self.shutter = self.SHUTTER_OPEN
 
     async def shutter_close(self):
         await self.send_cmd('OSH:1')
-        self.shutter = False
+        self.shutter = self.SHUTER_CLOSED
 
     async def set_shutter_in(self, shutter_time):
         await self.send_cmd(f'VXX:SEFS1={shutter_time}')

@@ -35,7 +35,7 @@ class ProjectorFrame:
             self.frame,
             text='Open',
             command=self.wrapper_shutter_open,
-            bg="#C1EF25",
+            bg="#04A777",
             fg="white", width=5, highlightthickness=0
         )
         self.shutter_off_btn = Button(
@@ -56,7 +56,19 @@ class ProjectorFrame:
             self.frame, text='x', command=self.close_frame, bg="#F24333",
             fg="white", width=1, height=1, highlightthickness=0
         )
-        self.bg_status_color = 'green' if self.projector.shutter else 'red'
+        self.power_status = Label(
+            self.frame,
+            text="●",  # Circle character
+            font=("Arial", 10),
+            foreground="gray" if self.projector.power is None else (
+                "green" if self.projector.power else "red"),
+            background="#363537",  # Same as frame background
+            borderwidth=0,
+            padx=0,
+            pady=0
+        )
+
+        self.bg_status_color = 'red' if self.projector.shutter else 'green'
         self.screen_status = Label(
             self.frame,
             text=self.get_screen_status(),
@@ -94,6 +106,7 @@ class ProjectorFrame:
         # Расположение
         self.label.grid(row=0, column=0, columnspan=2, pady=2)
         self.group.grid(row=0, column=2, pady=2)
+        self.power_status.grid(row=0, column=0, pady=2)
         self.close_btn.grid(row=0, column=3, pady=2, padx=2)
         self.shutter_on_btn.grid(row=1, column=0, pady=2)
         self.shutter_off_btn.grid(row=1, column=1, pady=2)
@@ -106,7 +119,7 @@ class ProjectorFrame:
         self._drag_data = {"x": 0, "y": 0}
 
     def get_screen_status(self):
-        return f'{"Open" if self.projector.shutter else "Closed"}'
+        return f'{"Closed" if self.projector.shutter else "Open"}'
 
     async def shutter_open(self):
         try:
@@ -121,7 +134,7 @@ class ProjectorFrame:
         else:
             self.screen_status['text'] = self.get_screen_status()
             self.screen_status['background'] = (
-                'green' if self.projector.shutter else 'red'
+                'red' if self.projector.shutter else 'green'
             )
 
     async def shutter_close(self):
@@ -136,7 +149,7 @@ class ProjectorFrame:
             print(self.get_screen_status())
             self.screen_status['text'] = self.get_screen_status()
             self.screen_status['background'] = (
-                'green' if self.projector.shutter else 'red'
+                'red' if self.projector.shutter else 'green'
             )
 
     def wrapper_shutter_close(self):
@@ -174,6 +187,11 @@ class ProjectorFrame:
         y = self.frame.winfo_y() - self._drag_data["y"] + event.y
         self.frame.place(x=x, y=y)
 
+    def update_power_status(self):
+        self.power_status['foreground'] = "gray" if (
+            self.projector.power is None) else (
+            "green" if self.projector.power else "red")
+
 
 class MainFrame:
     def __init__(self) -> None:
@@ -200,7 +218,7 @@ class MainFrame:
         # Создание окна
         self.root = Tk()
         self.root.title("3P Shutter Control")
-        self.root.geometry("466x400")  # Размер окна по умолчанию
+        self.root.geometry("566x400")  # Размер окна по умолчанию
         self.root.configure(background="#363537")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -262,6 +280,25 @@ class MainFrame:
             highlightthickness=0
         )
 
+        self.power_on_all_btn = Button(
+            self.button_frame,
+            text='On All',
+            command=self.power_on_all_projectors,
+            bg="#5D9C59",  # Green color
+            fg="white",
+            width=7,
+            highlightthickness=0
+        )
+        self.power_off_all_btn = Button(
+            self.button_frame,
+            text='Off All',
+            command=self.power_off_all_projectors,
+            bg="#DF2E38",  # Red color
+            fg="white",
+            width=7,
+            highlightthickness=0
+        )
+
         # Расположение кнопок
         self.all_shutter_on_btn.grid(
             row=1, column=0,
@@ -276,6 +313,9 @@ class MainFrame:
         self.add_projector_btn.grid(row=0, column=0, padx=5, pady=2)
         self.load_projectors_btn.grid(row=0, column=1, padx=5, pady=2)
         self.save_projectors_btn.grid(row=0, column=2, padx=5, pady=2)
+
+        self.power_on_all_btn.grid(row=0, column=3, padx=5, pady=2)
+        self.power_off_all_btn.grid(row=1, column=3, padx=5, pady=2)
 
         # Область для перемещения фреймов проекторов
         self.canvas = Frame(
@@ -366,9 +406,33 @@ class MainFrame:
                 'green' if frame.projector.shutter else 'red'
             )
             frame.screen_status['text'] = frame.get_screen_status()
+            frame.update_power_status()
 
     def wrapper_update(self):
         asyncio.create_task(self.update())
+
+    async def power_on_all(self):
+        tasks = []
+        for frame in self.active_frame:
+            task = asyncio.create_task(frame.projector.power_on())
+            tasks.append(task)
+        await asyncio.gather(*tasks)
+        print("All projectors powered on")
+
+    def power_on_all_projectors(self):
+        asyncio.create_task(self.power_on_all())
+
+    async def power_off_all(self):
+        tasks = []
+        for frame in self.active_frame:
+            print(frame.projector.label)
+            task = asyncio.create_task(frame.projector.power_off())
+            tasks.append(task)
+        await asyncio.gather(*tasks)
+        print("All projectors powered off")
+
+    def power_off_all_projectors(self):
+        asyncio.create_task(self.power_off_all())
 
     def on_close(self):
         # Здесь можно добавить логику завершения или очистки
