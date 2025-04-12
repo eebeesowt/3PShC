@@ -15,4 +15,4 @@ venv/
 *.iml
 
 __pycache__/
-*.txt
+teset.txt
