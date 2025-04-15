@@ -370,7 +370,6 @@ class MainFrame:
     def shutter_open_handler(self, address, *args):
         projector = address.split('/')[-1]
         if args[0] == 3:
-            print(f'clikc {projector}')
             for frame in self.active_frame:
                 if frame.projector.ip_room_nomber == projector:
                     asyncio.create_task(frame.shutter_open())
@@ -379,7 +378,6 @@ class MainFrame:
     def shutter_close_handler(self, address, *args):
         projector = address.split('/')[-1]
         if args[0] == 3:
-            print(f'clikc {projector}')
             for frame in self.active_frame:
                 if frame.projector.ip_room_nomber == projector:
                     asyncio.create_task(frame.shutter_close())
@@ -438,7 +436,6 @@ class MainFrame:
     async def power_off_all(self):
         tasks = []
         for frame in self.active_frame:
-            print(frame.projector.label)
             task = asyncio.create_task(frame.power_off())
             tasks.append(task)
         await asyncio.gather(*tasks)

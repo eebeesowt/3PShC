@@ -5,6 +5,18 @@
 в папке doc, документация команд
 
 
+Для запуска необходим [python](https://www.python.org/) и [виртуальное окружение](https://skillbox.ru/media/code/python-venv-chto-takoe-virtualnoe-okruzhenie-i-kak-im-polzovatsya/)
+для начала надо установить зависимости
+```
+pip install -r req.txt
+
+```
+после чего можно запустить приложение
+```
+python src/app.py
+```
+
+
 Сохраняет данные проекторов и координаты в формате:
 ```
 width,height
