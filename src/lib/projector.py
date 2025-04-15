@@ -23,17 +23,13 @@ class Projector:
                                   3.0, 3.5, 4.0, 5.0, 7.0, 10.0]
         self.SHUTTER_OPEN = False
         self.SHUTER_CLOSED = True
-        # try:
-        #     asyncio.run(self.get_info())
-        # except Exception as exc:
-        #     raise exc
 
     async def send_cmd(self, cmd, timeout=2):
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(self.ip, self.port), timeout
             )
-        except asyncio.TimeoutError as e:
+        except Exception as e:
             raise asyncio.TimeoutError(
                 f"Connection to {self.ip}:{self.port} timed out") from e
         try:
@@ -59,19 +55,23 @@ class Projector:
         return decode_answer
 
     async def get_info(self):
-        power = await self.send_cmd('QPW')
-        if power == '001':
-            self.power = True
-            shutter = await self.send_cmd('QSH')
-            if shutter == '0':
-                self.shutter = self.SHUTTER_OPEN
-            elif shutter == '1':
-                self.shutter = self.SHUTER_CLOSED
-        elif power == '000':
-            self.power = False
+        try:
+            power = await self.send_cmd('QPW')
+        except Exception as e:
+            print(f"Error getting power state: {e}")
+            return
         else:
-            print(power)
-            raise ValueError('Unknown power state')
+            if power == '001':
+                self.power = True
+                shutter = await self.send_cmd('QSH')
+                if shutter == '0':
+                    self.shutter = self.SHUTTER_OPEN
+                elif shutter == '1':
+                    self.shutter = self.SHUTER_CLOSED
+            elif power == '000':
+                self.power = False
+            else:
+                raise ValueError('Unknown power state')
 
         get_shutter_in = await self.send_cmd('QVX:SEFS1')
         answer_shutter_in_time = get_shutter_in.split('=')

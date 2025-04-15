@@ -68,7 +68,7 @@ class ProjectorFrame:
             pady=0
         )
 
-        self.bg_status_color = 'red' if self.projector.shutter else 'green'
+        self.bg_status_color = self.get_screen_status_color()
         self.screen_status = Label(
             self.frame,
             text=self.get_screen_status(),
@@ -119,7 +119,10 @@ class ProjectorFrame:
         self._drag_data = {"x": 0, "y": 0}
 
     def get_screen_status(self):
-        return f'{"Closed" if self.projector.shutter else "Open"}'
+        return f'{'Closed' if self.projector.shutter else 'Open'}'
+
+    def get_screen_status_color(self):
+        return 'red' if self.projector.shutter else 'green'
 
     async def shutter_open(self):
         try:
@@ -132,10 +135,7 @@ class ProjectorFrame:
             self.screen_status['foreground'] = '#ffffff'
             self.screen_status['text'] = 'Error'
         else:
-            self.screen_status['text'] = self.get_screen_status()
-            self.screen_status['background'] = (
-                'red' if self.projector.shutter else 'green'
-            )
+            self.update_screen_status()
 
     async def shutter_close(self):
         try:
@@ -146,11 +146,7 @@ class ProjectorFrame:
             self.screen_status['foreground'] = '#ffffff'
             self.screen_status['text'] = 'Error'
         else:
-            print(self.get_screen_status())
-            self.screen_status['text'] = self.get_screen_status()
-            self.screen_status['background'] = (
-                'red' if self.projector.shutter else 'green'
-            )
+            self.update_screen_status()
 
     def wrapper_shutter_close(self):
         asyncio.create_task(self.shutter_close())
@@ -162,7 +158,6 @@ class ProjectorFrame:
         selected_time = self.shutter_in_menu.get()
         try:
             asyncio.create_task(self.projector.set_shutter_in(selected_time))
-            print(f"Shutter In Time set to {selected_time}")
         except Exception as e:
             print(f"Error setting Shutter In Time: {e}")
 
@@ -170,7 +165,6 @@ class ProjectorFrame:
         selected_time = self.shutter_out_menu.get()
         try:
             asyncio.create_task(self.projector.set_shutter_out(selected_time))
-            print(f"Shutter Out Time set to {selected_time}")
         except Exception as e:
             print(f"Error setting Shutter Out Time: {e}")
 
@@ -191,6 +185,42 @@ class ProjectorFrame:
         self.power_status['foreground'] = "gray" if (
             self.projector.power is None) else (
             "green" if self.projector.power else "red")
+
+    def update_screen_status(self):
+        self.screen_status['background'] = (
+            self.get_screen_status_color()
+        )
+        self.screen_status['text'] = self.get_screen_status()
+
+    async def update(self):
+        try:
+            await self.projector.get_info()
+        except Exception as e:
+            print(f"Error updating projector {self.projector.label}: {e}")
+        self.update_screen_status()
+        self.update_power_status()
+
+    def update_wrapper(self):
+        try:
+            asyncio.create_task(self.update())
+        except Exception as e:
+            print(f"Error updating projector {self.projector.label}: {e}")
+
+    async def power_on(self):
+        try:
+            await self.projector.power_on()
+        except Exception as e:
+            print(f"Error powering on projector {self.projector.label}: {e}")
+        else:
+            self.update_power_status()
+
+    async def power_off(self):
+        try:
+            await self.projector.power_off()
+        except Exception as e:
+            print(f"Error powering off projector {self.projector.label}: {e}")
+        else:
+            self.update_power_status()
 
 
 class MainFrame:
@@ -264,7 +294,7 @@ class MainFrame:
         self.load_projectors_btn = Button(
             self.button_frame,
             text='Load from File',
-            command=self.load_projectors_from_file,
+            command=self.wrapper_load_projectors,
             bg="#729B79",
             fg="white",
             width=15,
@@ -359,14 +389,9 @@ class MainFrame:
         tasks = []
         for frame in self.active_frame:
             if frame.grp.get() == 1:
-                task = asyncio.create_task(frame.projector.shutter_close())
+                task = asyncio.create_task(frame.shutter_close())
                 tasks.append(task)
         await asyncio.gather(*tasks)
-        for frame in self.active_frame:
-            frame.screen_status['background'] = (
-                'green' if frame.projector.shutter else 'red'
-            )
-            frame.screen_status['text'] = frame.get_screen_status()
 
     def cls_async_grp_shtr(self):
         asyncio.create_task(self.close_group_shutter())
@@ -375,14 +400,9 @@ class MainFrame:
         tasks = []
         for frame in self.active_frame:
             if frame.grp.get() == 1:
-                task = asyncio.create_task(frame.projector.shutter_open())
+                task = asyncio.create_task(frame.shutter_open())
                 tasks.append(task)
         await asyncio.gather(*tasks)
-        for frame in self.active_frame:
-            frame.screen_status['background'] = (
-                'green' if frame.projector.shutter else 'red'
-            )
-            frame.screen_status['text'] = frame.get_screen_status()
 
     def opn_async_grp_shtr(self):
         asyncio.create_task(self.open_group_shutter())
@@ -398,15 +418,9 @@ class MainFrame:
     async def update(self):
         for frame in self.active_frame:
             try:
-                await frame.projector.get_info()
+                await frame.update()
             except Exception as e:
                 print(f"Error updating projector {frame.projector.label}: {e}")
-        for frame in self.active_frame:
-            frame.screen_status['background'] = (
-                'green' if frame.projector.shutter else 'red'
-            )
-            frame.screen_status['text'] = frame.get_screen_status()
-            frame.update_power_status()
 
     def wrapper_update(self):
         asyncio.create_task(self.update())
@@ -414,10 +428,9 @@ class MainFrame:
     async def power_on_all(self):
         tasks = []
         for frame in self.active_frame:
-            task = asyncio.create_task(frame.projector.power_on())
+            task = asyncio.create_task(frame.power_on())
             tasks.append(task)
         await asyncio.gather(*tasks)
-        print("All projectors powered on")
 
     def power_on_all_projectors(self):
         asyncio.create_task(self.power_on_all())
@@ -426,10 +439,9 @@ class MainFrame:
         tasks = []
         for frame in self.active_frame:
             print(frame.projector.label)
-            task = asyncio.create_task(frame.projector.power_off())
+            task = asyncio.create_task(frame.power_off())
             tasks.append(task)
         await asyncio.gather(*tasks)
-        print("All projectors powered off")
 
     def power_off_all_projectors(self):
         asyncio.create_task(self.power_off_all())
@@ -439,7 +451,7 @@ class MainFrame:
         print("Закрытие MainFrame...")
         self.root.destroy()
 
-    def load_projectors_from_file(self):
+    async def load_projectors_from_file(self):
         """
         Загружает проекторы, их координаты и размер окна из файла.
         """
@@ -485,6 +497,7 @@ class MainFrame:
                             label=label,
                             id=len(self.active_frame) + 1,
                         )
+                        await new_projector.get_info()
                     except Exception as e:
                         print("Error creating projector:")
                         print(f"  ip: {ip}")
@@ -502,6 +515,9 @@ class MainFrame:
             print("Window size loaded successfully.")
         except Exception as e:
             print(f"Error while loading projectors: {e}")
+
+    def wrapper_load_projectors(self):
+        asyncio.create_task(self.load_projectors_from_file())
 
     def save_projectors_to_file(self):
         """
@@ -585,7 +601,7 @@ class MainFrame:
         label_entry.grid(row=4, column=1, padx=10, pady=5)
 
         # Кнопка для добавления проектора
-        def add_projector():
+        async def async_add_projector():
             ip = ip_entry.get()
             port = int(port_entry.get())
             username = username_entry.get()
@@ -601,6 +617,12 @@ class MainFrame:
                 label=label,
                 id=len(self.active_frame) + 1,
             )
+            await new_projector.get_info()
+            # Проверка на существование проекторов с таким же IP
+            for frame in self.active_frame:
+                if frame.projector.ip == new_projector.ip:
+                    print(f"{new_projector.ip} already exists.")
+                    return
             frame = ProjectorFrame(
                 new_projector, self.canvas, self.remove_frame
             )
@@ -614,6 +636,9 @@ class MainFrame:
 
             # Закрытие окна после добавления
             add_window.destroy()
+
+        def add_projector():
+            asyncio.create_task(async_add_projector())
 
         add_button = Button(add_window, text="Add", command=add_projector)
         add_button.grid(row=5, column=0, columnspan=2, pady=10)
