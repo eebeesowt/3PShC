@@ -1,666 +1,394 @@
-from tkinter import (Tk,
-                     IntVar, Frame,
-                     Toplevel, Button, Checkbutton,
-                     Label, Entry, filedialog)
+"""
+Главное приложение для управления проекторами Panasonic.
+Рефакторенная версия с разделением логики и UI.
+Использует CustomTkinter для современного интерфейса.
+"""
 import asyncio
-from tkinter import ttk  # Для выпадающих списков
-# from typing import List   # create_projector
+import customtkinter as ctk
+from tkinter import filedialog
+from typing import Any, Coroutine, List, Optional, Set
+
 from lib.projector import Projector
+from lib.projector_controller import ProjectorController
+from lib.file_manager import FileManager
+from lib.osc_controller import OSCController
+from ui.projector_frame import ProjectorFrame
+from ui.add_projector_dialog import AddProjectorDialog
+from theme import Theme, AppConfig
+from utils.logger import setup_logger
 
-from pythonosc.osc_server import AsyncIOOSCUDPServer
-from pythonosc.dispatcher import Dispatcher
-
-
-class ProjectorFrame:
-    def __init__(self, projector: Projector, parent, remove_callback) -> None:
-        self.projector = projector
-        self.grp = IntVar()
-        self.remove_callback = remove_callback
-
-        # Содержимое фрейма
-        self.frame = Frame(
-            parent,
-            borderwidth=1,
-            relief='solid',
-            background="#363537"
-        )
-        self.label = Label(
-            self.frame,
-            text=projector.label,
-            font=("Helvetica", 12, "bold"),
-            foreground="white",
-            background="#363537"
-        )
-        self.shutter_on_btn = Button(
-            self.frame,
-            text='Open',
-            command=self.wrapper_shutter_open,
-            bg="#04A777",
-            fg="white", width=5, highlightthickness=0
-        )
-        self.shutter_off_btn = Button(
-            self.frame,
-            text='Close',
-            command=self.wrapper_shutter_close,
-            bg="#DC758F",
-            fg="white", width=5, highlightthickness=0
-        )
-        self.group = Checkbutton(
-            self.frame,
-            text="Grp",
-            variable=self.grp,
-            background="#363537",
-            highlightthickness=0
-        )
-        self.close_btn = Button(
-            self.frame, text='x', command=self.close_frame, bg="#F24333",
-            fg="white", width=1, height=1, highlightthickness=0
-        )
-        self.power_status = Label(
-            self.frame,
-            text="●",  # Circle character
-            font=("Arial", 10),
-            foreground="gray" if self.projector.power is None else (
-                "green" if self.projector.power else "red"),
-            background="#363537",  # Same as frame background
-            borderwidth=0,
-            padx=0,
-            pady=0
-        )
-
-        self.bg_status_color = self.get_screen_status_color()
-        self.screen_status = Label(
-            self.frame,
-            text=self.get_screen_status(),
-            background=self.bg_status_color,
-            foreground="white"
-        )
-        # Выпадающие списки для времени шаттера
-
-        if self.projector.shutter_in_time is not None:
-            self.shutter_in_menu = ttk.Combobox(
-                self.frame,
-                values=self.projector.shutter_time_dict,
-                state="readonly",
-                width=5
-            )
-            self.shutter_in_menu.set(self.projector.shutter_in_time)
-            self.shutter_in_menu.bind(
-                "<<ComboboxSelected>>", self.set_shutter_in
-            )
-            self.shutter_in_menu.grid(row=2, column=0, pady=2)
-
-        if self.projector.shutter_out_time is not None:
-            self.shutter_out_menu = ttk.Combobox(
-                self.frame,
-                values=self.projector.shutter_time_dict,
-                state="readonly",
-                width=5
-            )
-            self.shutter_out_menu.set(self.projector.shutter_out_time)
-            self.shutter_out_menu.bind(
-                "<<ComboboxSelected>>", self.set_shutter_out
-            )
-            self.shutter_out_menu.grid(row=2, column=1, pady=2)
-
-        # Расположение
-        self.label.grid(row=0, column=0, columnspan=2, pady=2)
-        self.group.grid(row=0, column=2, pady=2)
-        self.power_status.grid(row=0, column=0, pady=2)
-        self.close_btn.grid(row=0, column=3, pady=2, padx=2)
-        self.shutter_on_btn.grid(row=1, column=0, pady=2)
-        self.shutter_off_btn.grid(row=1, column=1, pady=2)
-        self.screen_status.grid(row=1, column=2, pady=2)
-
-        # Перетаскивание
-        self.frame.bind("<Button-1>", self.start_drag)
-        self.frame.bind("<B1-Motion>", self.do_drag)
-
-        self._drag_data = {"x": 0, "y": 0}
-
-    def get_screen_status(self):
-        return f'{'Closed' if self.projector.shutter else 'Open'}'
-
-    def get_screen_status_color(self):
-        return 'red' if self.projector.shutter else 'green'
-
-    async def shutter_open(self):
-        try:
-            await self.projector.shutter_open()
-        except TimeoutError:
-            print(
-                "Error: Timeout while opening shutter"
-            )
-            self.screen_status['background'] = '#000000'
-            self.screen_status['foreground'] = '#ffffff'
-            self.screen_status['text'] = 'Error'
-        else:
-            self.update_screen_status()
-
-    async def shutter_close(self):
-        try:
-            await self.projector.shutter_close()
-        except TimeoutError:
-            print("Error: Timeout while closing shutter")
-            self.screen_status['background'] = '#000000'
-            self.screen_status['foreground'] = '#ffffff'
-            self.screen_status['text'] = 'Error'
-        else:
-            self.update_screen_status()
-
-    def wrapper_shutter_close(self):
-        asyncio.create_task(self.shutter_close())
-
-    def wrapper_shutter_open(self):
-        asyncio.create_task(self.shutter_open())
-
-    def set_shutter_in(self, event):
-        selected_time = self.shutter_in_menu.get()
-        try:
-            asyncio.create_task(self.projector.set_shutter_in(selected_time))
-        except Exception as e:
-            print(f"Error setting Shutter In Time: {e}")
-
-    def set_shutter_out(self, event):
-        selected_time = self.shutter_out_menu.get()
-        try:
-            asyncio.create_task(self.projector.set_shutter_out(selected_time))
-        except Exception as e:
-            print(f"Error setting Shutter Out Time: {e}")
-
-    def close_frame(self):
-        self.frame.destroy()
-        self.remove_callback(self)
-
-    def start_drag(self, event):
-        self._drag_data["x"] = event.x
-        self._drag_data["y"] = event.y
-
-    def do_drag(self, event):
-        x = self.frame.winfo_x() - self._drag_data["x"] + event.x
-        y = self.frame.winfo_y() - self._drag_data["y"] + event.y
-        self.frame.place(x=x, y=y)
-
-    def update_power_status(self):
-        self.power_status['foreground'] = "gray" if (
-            self.projector.power is None) else (
-            "green" if self.projector.power else "red")
-
-    def update_screen_status(self):
-        self.screen_status['background'] = (
-            self.get_screen_status_color()
-        )
-        self.screen_status['text'] = self.get_screen_status()
-
-    async def update(self):
-        try:
-            await self.projector.get_info()
-        except Exception as e:
-            print(f"Error updating projector {self.projector.label}: {e}")
-        self.update_screen_status()
-        self.update_power_status()
-
-    def update_wrapper(self):
-        try:
-            asyncio.create_task(self.update())
-        except Exception as e:
-            print(f"Error updating projector {self.projector.label}: {e}")
-
-    async def power_on(self):
-        try:
-            await self.projector.power_on()
-        except Exception as e:
-            print(f"Error powering on projector {self.projector.label}: {e}")
-        else:
-            self.update_power_status()
-
-    async def power_off(self):
-        try:
-            await self.projector.power_off()
-        except Exception as e:
-            print(f"Error powering off projector {self.projector.label}: {e}")
-        else:
-            self.update_power_status()
+logger = setup_logger(__name__)
 
 
-class MainFrame:
-    def __init__(self) -> None:
+class MainApplication:
+    """Главное окно приложения"""
+    
+    def __init__(self):
+        # Контроллеры (бизнес-логика)
+        self.controller = ProjectorController()
+        self.osc_controller = OSCController()
+        self.file_manager = FileManager()
+        
+        # UI элементы
+        self.projector_frames: List[ProjectorFrame] = []
+        self._tasks: Set[asyncio.Task] = set()
+        
+        # Создание главного окна
+        self._create_window()
+        self._create_widgets()
+        self._setup_osc_callbacks()
 
-        self.dispatcher = Dispatcher()
-        self.dispatcher.map(
-            "/shutter/open*",
-            self.shutter_open_handler
-            )
-        self.dispatcher.map(
-            "/shutter/close*",
-            self.shutter_close_handler
-            )
-        self.dispatcher.map(
-            "/shutter/group/open",
-            self.shutter_group_open_handler
-            )
-        self.dispatcher.map(
-            "/shutter/group/close",
-            self.shutter_group_close_handler
-            )
-        self.oscServer = None
+    def _create_task(self, coro: Coroutine[Any, Any, Any], description: str) -> asyncio.Task:
+        """Создать отслеживаемую async-задачу с логированием ошибок."""
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
 
-        # Создание окна
-        self.root = Tk()
-        self.root.title("3P Shutter Control")
-        self.root.geometry("566x400")  # Размер окна по умолчанию
-        self.root.configure(background="#363537")
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-
-        # Верхняя панель с кнопками
-        self.button_frame = Frame(self.root, background="#363537")
-        self.button_frame.pack(side='top', fill='x', padx=5, pady=5)
-
-        # Кнопки
-        self.all_shutter_on_btn = Button(
-            self.button_frame,
-            text='Open Group',
-            command=self.opn_async_grp_shtr,
-            bg="#04A777",
-            fg="white",
-            highlightthickness=0
-        )
-        self.all_shutter_off_btn = Button(
-            self.button_frame,
-            text='Close Group',
-            command=self.cls_async_grp_shtr,
-            bg="#DC758F",
-            fg="white",
-            highlightthickness=0
-        )
-        self.update_btn = Button(
-            self.button_frame,
-            text='Update',
-            command=self.wrapper_update,
-            bg="#FFDBB5",
-            fg="black",
-            width=10,
-            highlightthickness=0
-        )
-        self.add_projector_btn = Button(
-            self.button_frame,
-            text='Add Projector',
-            command=self.open_add_projector_window,
-            bg="#71A9F7",
-            fg="white",
-            width=12,
-            highlightthickness=0
-        )
-        self.load_projectors_btn = Button(
-            self.button_frame,
-            text='Load from File',
-            command=self.wrapper_load_projectors,
-            bg="#729B79",
-            fg="white",
-            width=15,
-            highlightthickness=0
-        )
-        self.save_projectors_btn = Button(
-            self.button_frame,
-            text='Save to File',
-            command=self.save_projectors_to_file,
-            bg="#14453D",
-            fg="white",
-            width=15,
-            highlightthickness=0
-        )
-
-        self.power_on_all_btn = Button(
-            self.button_frame,
-            text='On All',
-            command=self.power_on_all_projectors,
-            bg="#5D9C59",  # Green color
-            fg="white",
-            width=7,
-            highlightthickness=0
-        )
-        self.power_off_all_btn = Button(
-            self.button_frame,
-            text='Off All',
-            command=self.power_off_all_projectors,
-            bg="#DF2E38",  # Red color
-            fg="white",
-            width=7,
-            highlightthickness=0
-        )
-
-        # Расположение кнопок
-        self.all_shutter_on_btn.grid(
-            row=1, column=0,
-            ipadx=7, ipady=7,
-            pady=10
-        )
-        self.all_shutter_off_btn.grid(
-            row=1, column=1, ipadx=7, ipady=7, pady=10
-        )
-        self.update_btn.grid(row=1, column=2, padx=5, pady=10)
-
-        self.add_projector_btn.grid(row=0, column=0, padx=5, pady=2)
-        self.load_projectors_btn.grid(row=0, column=1, padx=5, pady=2)
-        self.save_projectors_btn.grid(row=0, column=2, padx=5, pady=2)
-
-        self.power_on_all_btn.grid(row=0, column=3, padx=5, pady=2)
-        self.power_off_all_btn.grid(row=1, column=3, padx=5, pady=2)
-
-        # Область для перемещения фреймов проекторов
-        self.canvas = Frame(
-            self.root,
-            borderwidth=2,
-            relief='sunken',
-            background="#938BA1"
-        )
-        self.canvas.pack(side='top', fill='both', expand=True, padx=5, pady=5)
-
-        # Вспомогательные переменные
-        self.active_frame = []
-
-    async def setup_osc(self):
-        loop = asyncio.get_running_loop()
-        self.oscServer = AsyncIOOSCUDPServer(
-            ('127.0.0.1', 7001),
-            self.dispatcher,
-            loop
-        )
-
-    def shutter_open_handler(self, address, *args):
-        projector = address.split('/')[-1]
-        if args[0] == 3:
-            for frame in self.active_frame:
-                if frame.projector.ip_room_nomber == projector:
-                    asyncio.create_task(frame.shutter_open())
-                    break
-
-    def shutter_close_handler(self, address, *args):
-        projector = address.split('/')[-1]
-        if args[0] == 3:
-            for frame in self.active_frame:
-                if frame.projector.ip_room_nomber == projector:
-                    asyncio.create_task(frame.shutter_close())
-                    break
-
-    async def close_group_shutter(self):
-        tasks = []
-        for frame in self.active_frame:
-            if frame.grp.get() == 1:
-                task = asyncio.create_task(frame.shutter_close())
-                tasks.append(task)
-        await asyncio.gather(*tasks)
-
-    def cls_async_grp_shtr(self):
-        asyncio.create_task(self.close_group_shutter())
-
-    async def open_group_shutter(self):
-        tasks = []
-        for frame in self.active_frame:
-            if frame.grp.get() == 1:
-                task = asyncio.create_task(frame.shutter_open())
-                tasks.append(task)
-        await asyncio.gather(*tasks)
-
-    def opn_async_grp_shtr(self):
-        asyncio.create_task(self.open_group_shutter())
-
-    def shutter_group_open_handler(self, address, *args):
-        if args[0] == 3:
-            self.opn_async_grp_shtr()
-
-    def shutter_group_close_handler(self, address, *args):
-        if args[0] == 3:
-            self.cls_async_grp_shtr()
-
-    async def update(self):
-        for frame in self.active_frame:
+        def _on_done(done_task: asyncio.Task):
+            self._tasks.discard(done_task)
             try:
-                await frame.update()
-            except Exception as e:
-                print(f"Error updating projector {frame.projector.label}: {e}")
+                exception = done_task.exception()
+            except asyncio.CancelledError:
+                return
+            if exception:
+                logger.error(f"Task '{description}' failed: {exception}")
 
-    def wrapper_update(self):
-        asyncio.create_task(self.update())
-
-    async def power_on_all(self):
-        tasks = []
-        for frame in self.active_frame:
-            task = asyncio.create_task(frame.power_on())
-            tasks.append(task)
-        await asyncio.gather(*tasks)
-
-    def power_on_all_projectors(self):
-        asyncio.create_task(self.power_on_all())
-
-    async def power_off_all(self):
-        tasks = []
-        for frame in self.active_frame:
-            task = asyncio.create_task(frame.power_off())
-            tasks.append(task)
-        await asyncio.gather(*tasks)
-
-    def power_off_all_projectors(self):
-        asyncio.create_task(self.power_off_all())
-
-    def on_close(self):
-        # Здесь можно добавить логику завершения или очистки
-        print("Закрытие MainFrame...")
-        self.root.destroy()
-
-    async def load_projectors_from_file(self):
-        """
-        Загружает проекторы, их координаты и размер окна из файла.
-        """
+        task.add_done_callback(_on_done)
+        return task
+    
+    def _create_window(self):
+        """Создать главное окно"""
+        # Установить тему и цветовую схему
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("blue")
+        
+        self.root = ctk.CTk()
+        self.root.title(AppConfig.WINDOW_TITLE)
+        self.root.geometry(f"{AppConfig.WINDOW_WIDTH}x{AppConfig.WINDOW_HEIGHT}")
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        
+        logger.info("Main window created")
+    
+    def _create_button(self, text: str, command, fg_color: str, hover_color: str, 
+                      width: Optional[int] = None, text_color: Optional[str] = None) -> ctk.CTkButton:
+        """Создать кнопку с заданными параметрами"""
+        btn_config = {
+            'text': text,
+            'command': command,
+            'fg_color': fg_color,
+            'hover_color': hover_color
+        }
+        if width:
+            btn_config['width'] = width
+        if text_color:
+            btn_config['text_color'] = text_color
+        
+        return ctk.CTkButton(self.button_frame, **btn_config)
+    
+    def _create_widgets(self):
+        """Создать виджеты"""
+        # Верхняя панель с кнопками
+        self.button_frame = ctk.CTkFrame(self.root)
+        self.button_frame.pack(side='top', fill='x', padx=AppConfig.PADDING_MEDIUM, pady=AppConfig.PADDING_MEDIUM)
+        
+        # Кнопки управления группой
+        self.open_group_btn = self._create_button(
+            'Open Group', self._on_open_group, 
+            Theme.PRIMARY, Theme.PRIMARY_HOVER
+        )
+        
+        self.close_group_btn = self._create_button(
+            'Close Group', self._on_close_group,
+            Theme.DANGER, Theme.DANGER_HOVER
+        )
+        
+        # Кнопка обновления
+        self.update_btn = self._create_button(
+            'Update', self._on_update,
+            Theme.WARNING, Theme.WARNING_HOVER,
+            width=AppConfig.BUTTON_WIDTH_NORMAL,
+            text_color=Theme.TEXT_SECONDARY
+        )
+        
+        # Кнопка добавления проектора
+        self.add_projector_btn = self._create_button(
+            'Add Projector', self._on_add_projector,
+            Theme.INFO, Theme.INFO_HOVER,
+            width=AppConfig.BUTTON_WIDTH_LARGE
+        )
+        
+        # Кнопки загрузки и сохранения
+        self.load_btn = self._create_button(
+            'Load from File', self._on_load,
+            Theme.SUCCESS, Theme.SUCCESS_HOVER,
+            width=AppConfig.BUTTON_WIDTH_XLARGE
+        )
+        
+        self.save_btn = self._create_button(
+            'Save to File', self._on_save,
+            Theme.DARK, Theme.DARK_HOVER,
+            width=AppConfig.BUTTON_WIDTH_XLARGE
+        )
+        
+        # Кнопки питания
+        self.power_on_all_btn = self._create_button(
+            'On All', self._on_power_on_all,
+            Theme.SUCCESS_DARK, Theme.SUCCESS_DARK_HOVER,
+            width=70
+        )
+        
+        self.power_off_all_btn = self._create_button(
+            'Off All', self._on_power_off_all,
+            Theme.ERROR_BG, Theme.ERROR_HOVER,
+            width=70
+        )
+        
+        # Расположение кнопок
+        self.open_group_btn.grid(row=1, column=0, ipadx=AppConfig.GRID_IPADX, ipady=AppConfig.GRID_IPADY, pady=AppConfig.PADDING_LARGE)
+        self.close_group_btn.grid(row=1, column=1, ipadx=AppConfig.GRID_IPADX, ipady=AppConfig.GRID_IPADY, pady=AppConfig.PADDING_LARGE)
+        self.update_btn.grid(row=1, column=2, padx=AppConfig.PADDING_MEDIUM, pady=AppConfig.PADDING_LARGE)
+        
+        self.add_projector_btn.grid(row=0, column=0, padx=AppConfig.PADDING_MEDIUM, pady=AppConfig.PADDING_SMALL)
+        self.load_btn.grid(row=0, column=1, padx=AppConfig.PADDING_MEDIUM, pady=AppConfig.PADDING_SMALL)
+        self.save_btn.grid(row=0, column=2, padx=AppConfig.PADDING_MEDIUM, pady=AppConfig.PADDING_SMALL)
+        
+        self.power_on_all_btn.grid(row=0, column=3, padx=AppConfig.PADDING_MEDIUM, pady=AppConfig.PADDING_SMALL)
+        self.power_off_all_btn.grid(row=1, column=3, padx=AppConfig.PADDING_MEDIUM, pady=AppConfig.PADDING_SMALL)
+        
+        # Область для фреймов проекторов
+        self.canvas = ctk.CTkFrame(
+            self.root,
+            fg_color=Theme.CANVAS_BG
+        )
+        self.canvas.pack(side='top', fill='both', expand=True, padx=AppConfig.PADDING_MEDIUM, pady=AppConfig.PADDING_MEDIUM)
+    
+    def _setup_osc_callbacks(self):
+        """Настроить обработчики OSC событий"""
+        self.osc_controller.on_shutter_open = self._handle_osc_shutter_open
+        self.osc_controller.on_shutter_close = self._handle_osc_shutter_close
+        self.osc_controller.on_group_open = self._on_open_group
+        self.osc_controller.on_group_close = self._on_close_group
+    
+    # Обработчики OSC событий
+    
+    def _handle_osc_shutter_open(self, room_number: str):
+        """Обработать OSC команду открытия шаттера"""
+        projector = self.controller.get_projector_by_ip_room_number(room_number)
+        if projector:
+            # Найти соответствующий UI фрейм
+            for frame in self.projector_frames:
+                if frame.projector == projector:
+                    self._create_task(
+                        frame.execute_shutter_action(open_shutter=True),
+                        f"execute shutter open for {projector.label}"
+                    )
+                    break
+    
+    def _handle_osc_shutter_close(self, room_number: str):
+        """Обработать OSC команду закрытия шаттера"""
+        projector = self.controller.get_projector_by_ip_room_number(room_number)
+        if projector:
+            # Найти соответствующий UI фрейм
+            for frame in self.projector_frames:
+                if frame.projector == projector:
+                    self._create_task(
+                        frame.execute_shutter_action(open_shutter=False),
+                        f"execute shutter close for {projector.label}"
+                    )
+                    break
+    
+    # Обработчики событий UI
+    
+    def _execute_group_action(self, action_name: str, controller_method):
+        """Выполнить групповую операцию на выбранных проекторах"""
+        group_indices = [
+            i for i, frame in enumerate(self.projector_frames)
+            if frame.grp.get()
+        ]
+        logger.info(f"{action_name} for {len(group_indices)} projectors")
+        self._create_task(
+            controller_method(group_indices),
+            action_name
+        )
+        # Обновить UI фреймов
+        for idx in group_indices:
+            if idx < len(self.projector_frames):
+                self.projector_frames[idx].update_screen_status()
+    
+    def _on_open_group(self):
+        """Открыть шаттеры группы"""
+        self._execute_group_action(
+            "Opening group shutters",
+            self.controller.open_group_shutters
+        )
+    
+    def _on_close_group(self):
+        """Закрыть шаттеры группы"""
+        self._execute_group_action(
+            "Closing group shutters",
+            self.controller.close_group_shutters
+        )
+    
+    def _on_update(self):
+        """Обновить все проекторы"""
+        async def update_all():
+            logger.info("Updating all projectors")
+            await self.controller.update_all()
+            # Обновить UI
+            for frame in self.projector_frames:
+                frame.update_screen_status()
+                frame.update_power_status()
+        
+        self._create_task(update_all(), "update all projectors")
+    
+    def _execute_power_action(self, action_name: str, controller_method):
+        """Выполнить операцию питания на всех проекторах"""
+        async def power_action():
+            logger.info(action_name)
+            await controller_method()
+            # Обновить UI
+            for frame in self.projector_frames:
+                frame.update_power_status()
+        
+        self._create_task(power_action(), action_name)
+    
+    def _on_power_on_all(self):
+        """Включить все проекторы"""
+        self._execute_power_action(
+            "Powering on all projectors",
+            self.controller.power_on_all
+        )
+    
+    def _on_power_off_all(self):
+        """Выключить все проекторы"""
+        self._execute_power_action(
+            "Powering off all projectors",
+            self.controller.power_off_all
+        )
+    
+    def _on_add_projector(self):
+        """Открыть диалог добавления проектора"""
+        AddProjectorDialog(self.root, self._add_projector)
+    
+    def _add_projector(self, projector: Projector):
+        """Добавить новый проектор"""
+        # Добавить в контроллер
+        if not self.controller.add_projector(projector):
+            logger.warning(f"Projector {projector.ip} already exists")
+            return
+        
+        logger.info(f"Adding projector {projector.label} ({projector.ip})")
+        
+        # Создать UI фрейм
+        frame = ProjectorFrame(
+            projector,
+            self.canvas,
+            self._remove_frame,
+            lambda: None  # on_update callback
+        )
+        
+        # Позиционировать фрейм
+        x_offset = AppConfig.PROJECTOR_OFFSET_X + (len(self.projector_frames) % 2) * AppConfig.PROJECTOR_SPACING_X
+        y_offset = AppConfig.PROJECTOR_OFFSET_Y + (len(self.projector_frames) // 2) * AppConfig.PROJECTOR_SPACING_Y
+        frame.set_position(x_offset, y_offset)
+        
+        self.projector_frames.append(frame)
+    
+    def _remove_frame(self, frame: ProjectorFrame):
+        """Удалить фрейм проектора"""
+        if frame in self.projector_frames:
+            logger.info(f"Removing projector {frame.projector.label}")
+            self.projector_frames.remove(frame)
+            self.controller.remove_projector(frame.projector)
+    
+    def _on_load(self):
+        """Загрузить проекторы из файла"""
+        self._create_task(self._async_load(), "load projectors from file")
+    
+    async def _async_load(self):
+        """Асинхронная загрузка из файла"""
         file_path = filedialog.askopenfilename(
             title="Select Projectors File",
             filetypes=(("Text Files", "*.txt"), ("All Files", "*.*"))
         )
-
+        
         if not file_path:
-            print("No file selected.")
             return
-
-        try:
-            with open(file_path, "r") as file:
-                lines = file.readlines()
-
-                # Загружаем размер окна из первой строки
-                if len(lines) > 0:
-                    width, height = map(int, lines[0].strip().split(","))
-                    self.root.geometry(f"{width}x{height}")
-
-                # Загружаем проекторы из оставшихся строк
-                for line in lines[1:]:
-                    # Ожидаемый формат строки:
-                    # IP,PORT,USERNAME,PASSWORD,LABEL,X,Y
-                    parts = line.strip().split(",")
-                    if len(parts) != 7:
-                        print(f"Invalid line format: {line}")
-                        continue
-
-                    ip, port, username, password, label, x, y = parts
-                    port = int(port)
-                    x = int(x)
-                    y = int(y)
-
-                    # Создание нового проектора
-                    try:
-                        new_projector = Projector(
-                            ip=ip,
-                            port=port,
-                            login=username,
-                            password=password,
-                            label=label,
-                            id=len(self.active_frame) + 1,
-                        )
-                        await new_projector.get_info()
-                    except Exception as e:
-                        print("Error creating projector:")
-                        print(f"  ip: {ip}")
-                        print(f"  Error: {e}")
-                        continue
-                    # Создание фрейма для нового проектора
-                    frame = ProjectorFrame(
-                        new_projector, self.canvas, self.remove_frame
-                    )
-
-                    # Расположение фрейма на основе координат
-                    self.active_frame.append(frame)
-                    frame.frame.place(x=x, y=y)
-
-            print("Window size loaded successfully.")
-        except Exception as e:
-            print(f"Error while loading projectors: {e}")
-
-    def wrapper_load_projectors(self):
-        asyncio.create_task(self.load_projectors_from_file())
-
-    def save_projectors_to_file(self):
-        """
-        Сохраняет активные проекторы, их координаты и размер окна в файл.
-        """
+        
+        logger.info(f"Loading projectors from {file_path}")
+        
+        # Очистить текущие проекторы
+        for frame in self.projector_frames:
+            frame.frame.destroy()
+        self.projector_frames.clear()
+        self.controller.clear()
+        
+        # Загрузить из файла
+        window_size, projectors_data = await self.file_manager.load_from_file(
+            file_path
+        )
+        
+        # Установить размер окна
+        if window_size:
+            width, height = window_size
+            self.root.geometry(f"{width}x{height}")
+            logger.info(f"Set window size to {width}x{height}")
+        
+        # Добавить проекторы
+        for projector, x, y in projectors_data:
+            self.controller.add_projector(projector)
+            
+            frame = ProjectorFrame(
+                projector,
+                self.canvas,
+                self._remove_frame,
+                lambda: None
+            )
+            frame.set_position(x, y)
+            self.projector_frames.append(frame)
+        
+        logger.info(f"Loaded {len(projectors_data)} projectors")
+    
+    def _on_save(self):
+        """Сохранить проекторы в файл"""
         file_path = filedialog.asksaveasfilename(
             title="Save Projectors File",
             defaultextension=".txt",
             filetypes=(("Text Files", "*.txt"), ("All Files", "*.*"))
         )
-
+        
         if not file_path:
-            print("No file selected for saving.")
             return
-
-        try:
-            with open(file_path, "w") as file:
-                # Сохраняем размер окна
-                width = self.root.winfo_width()
-                height = self.root.winfo_height()
-                file.write(f"{width},{height}\n")
-
-                # Сохраняем данные проекторов
-                for frame in self.active_frame:
-                    projector = frame.projector
-                    x = frame.frame.winfo_x()
-                    y = frame.frame.winfo_y()
-                    # Сохраняем данные проектора и координаты в формате:
-                    # IP,PORT,USERNAME,PASSWORD,LABEL,X,Y
-                    file.write(
-                        f"{projector.ip},{projector.port},{projector.login},"
-                        f"{projector.password},{projector.label},{x},{y}\n"
-                    )
-            print(
-                (
-                    f"Projectors, positions, and window size"
-                    f"saved successfully to {file_path}."
-                )
-            )
-        except Exception as e:
-            print(f"Error while saving projectors: {e}")
-
-    def open_add_projector_window(self):
-        # Создание нового окна
-        add_window = Toplevel(self.root)
-        add_window.title("Add Projector")
-        add_window.geometry("300x250")
-
-        # Поля для ввода параметров
-        Label(
-            add_window, text="IP Address:"
-        ).grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        ip_entry = Entry(add_window)
-        ip_entry.grid(row=0, column=1, padx=10, pady=5)
-
-        Label(
-            add_window, text="Port:"
-        ).grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        port_entry = Entry(add_window)
-        port_entry.grid(row=1, column=1, padx=10, pady=5)
-
-        Label(
-            add_window, text="Username:"
-        ).grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        username_entry = Entry(add_window)
-        username_entry.grid(
-            row=2, column=1, padx=10, pady=5
-        )
-        Label(
-            add_window, text="Password:"
-        ).grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        password_entry = Entry(add_window, show="*")
-        password_entry.grid(
-            row=3, column=1, padx=10, pady=5
-        )
-
-        Label(
-            add_window, text="Label:"
-        ).grid(row=4, column=0, padx=10, pady=5, sticky="w")
-        label_entry = Entry(add_window)
-        label_entry.grid(row=4, column=1, padx=10, pady=5)
-
-        # Кнопка для добавления проектора
-        async def async_add_projector():
-            ip = ip_entry.get()
-            port = int(port_entry.get())
-            username = username_entry.get()
-            password = password_entry.get()
-            label = label_entry.get()
-
-            # Создание нового проектора
-            new_projector = Projector(
-                ip=ip,
-                port=port,
-                login=username,
-                password=password,
-                label=label,
-                id=len(self.active_frame) + 1,
-            )
-            await new_projector.get_info()
-            # Проверка на существование проекторов с таким же IP
-            for frame in self.active_frame:
-                if frame.projector.ip == new_projector.ip:
-                    print(f"{new_projector.ip} already exists.")
-                    return
-            frame = ProjectorFrame(
-                new_projector, self.canvas, self.remove_frame
-            )
-
-            # Расположение нового фрейма
-            x_offset = 10 + (len(self.active_frame) % 2) * 250
-            y_offset = 10 + (len(self.active_frame) // 2) * 100
-
-            self.active_frame.append(frame)
-            frame.frame.place(x=x_offset, y=y_offset)
-
-            # Закрытие окна после добавления
-            add_window.destroy()
-
-        def add_projector():
-            asyncio.create_task(async_add_projector())
-
-        add_button = Button(add_window, text="Add", command=add_projector)
-        add_button.grid(row=5, column=0, columnspan=2, pady=10)
-
-    def add_frames(self, projectors):
-        x_offset = 10  # Начальный отступ по X
-        y_offset = 10  # Начальный отступ по Y
-        step_x = 250   # Шаг между фреймами по X
-        step_y = 100   # Шаг между фреймами по Y
-        max_columns = 2  # Максимальное количество фреймов в строке
-        for index, projector in enumerate(projectors):
-            x = x_offset + (index % max_columns) * step_x
-            y = y_offset + (index // max_columns) * step_y
-
-            frame = ProjectorFrame(projector, self.canvas, self.remove_frame)
-            self.active_frame.append(frame)
-            frame.frame.place(x=x, y=y)
-
-    def remove_frame(self, frame):
-        if frame in self.active_frame:
-            self.active_frame.remove(frame)
-
-    async def run_server(self):
-        await self.setup_osc()
-        transport, protocol = await self.oscServer.create_serve_endpoint()
+        
+        logger.info(f"Saving projectors to {file_path}")
+        
+        # Собрать данные
+        window_size = (self.root.winfo_width(), self.root.winfo_height())
+        projectors_data = [
+            (frame.projector, *frame.get_position())
+            for frame in self.projector_frames
+        ]
+        
+        # Сохранить
+        self.file_manager.save_to_file(file_path, window_size, projectors_data)
+        logger.info(f"Saved {len(projectors_data)} projectors")
+    
+    def _on_close(self):
+        """Обработать закрытие окна"""
+        logger.info("Closing application...")
+        self.osc_controller.stop()
+        for task in list(self._tasks):
+            task.cancel()
+        self.root.destroy()
+    
+    # Главный цикл приложения
+    
+    async def run(self):
+        """Запустить приложение"""
+        # Запустить OSC сервер
+        logger.info("Starting OSC server...")
+        await self.osc_controller.start()
+        
+        # Главный цикл Tkinter
         try:
             while True:
                 if not self.root.winfo_exists():
@@ -668,9 +396,22 @@ class MainFrame:
                 self.root.update()
                 await asyncio.sleep(0.01)
         finally:
-            transport.close()
+            if self._tasks:
+                pending = list(self._tasks)
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                self._tasks.difference_update(pending)
+            self.osc_controller.stop()
+            logger.info("Application stopped")
+
+
+def main():
+    """Точка входа в приложение"""
+    logger.info("=== Starting 3P Shutter Control ===")
+    app = MainApplication()
+    asyncio.run(app.run())
 
 
 if __name__ == "__main__":
-    main = MainFrame()
-    asyncio.run(main.run_server())
+    main()

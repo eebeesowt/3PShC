@@ -1,0 +1,21 @@
+2025-10-29 10:15:42 - __main__ - INFO - === Starting 3P Shutter Control ===
+2025-10-29 10:15:43 - __main__ - INFO - Main window created
+2025-10-29 10:15:43 - __main__ - INFO - Starting OSC server...
+2025-10-29 10:15:43 - lib.osc_controller - INFO - OSC Server started on 127.0.0.1:7001
+2025-10-29 10:15:55 - __main__ - INFO - Updating all projectors
+2025-10-29 10:16:21 - ui.add_projector_dialog - INFO - Creating new projector 10.101.10.124:1024
+2025-10-29 10:16:23 - lib.projector - WARNING - Connection timed out for 10.101.10.124
+2025-10-29 10:16:23 - ui.add_projector_dialog - ERROR - Error creating projector: Unknown power state: Timeout
+2025-10-29 10:16:23 - ui.add_projector_dialog - WARNING - Validation error: Connection error: Unknown power state: Timeout
+2025-10-29 10:16:50 - __main__ - INFO - Closing application...
+2025-10-29 10:16:50 - lib.osc_controller - INFO - OSC Server stopped
+2025-10-29 10:16:50 - lib.osc_controller - INFO - OSC Server stopped
+2025-10-29 10:16:50 - __main__ - INFO - Application stopped
+2025-10-30 13:27:56 - __main__ - INFO - === Starting 3P Shutter Control ===
+2025-10-30 13:27:57 - __main__ - INFO - Main window created
+2025-10-30 13:27:57 - __main__ - INFO - Starting OSC server...
+2025-10-30 13:27:57 - lib.osc_controller - INFO - OSC Server started on 127.0.0.1:7001
+2025-10-30 13:28:13 - __main__ - INFO - Closing application...
+2025-10-30 13:28:13 - lib.osc_controller - INFO - OSC Server stopped
+2025-10-30 13:28:13 - lib.osc_controller - INFO - OSC Server stopped
+2025-10-30 13:28:13 - __main__ - INFO - Application stopped

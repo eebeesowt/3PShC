@@ -1,5 +1,14 @@
 import hashlib
 import asyncio
+from lib.constants import (
+    ProjectorCommands,
+    ProjectorResponses,
+    ProjectorProtocol,
+    ProjectorStates
+)
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class Projector:
@@ -9,105 +18,115 @@ class Projector:
         self.port = port
         self.login = login
         self.password = password
-        self.label = label
+        self.label = label if label else ip
         self.id = id
-        if label == '':
-            self.label = ip
 
         self.power = None
         self.group = False
         self.shutter = None
         self.shutter_in_time = None
         self.shutter_out_time = None
-        self.shutter_time_dict = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5,
-                                  3.0, 3.5, 4.0, 5.0, 7.0, 10.0]
-        self.SHUTTER_OPEN = False
-        self.SHUTER_CLOSED = True
+        self.shutter_time_dict = ProjectorStates.SHUTTER_TIME_OPTIONS
+        self.SHUTTER_OPEN = ProjectorStates.SHUTTER_OPEN
+        self.SHUTER_CLOSED = ProjectorStates.SHUTTER_CLOSED
 
-    async def send_cmd(self, cmd, timeout=2):
+    async def send_cmd(self, cmd, timeout=ProjectorProtocol.DEFAULT_TIMEOUT):
+        writer = None
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(self.ip, self.port), timeout
             )
         except Exception as e:
+            logger.warning(f"Connection attempt failed for {self.ip}:{self.port}: {e}")
             raise asyncio.TimeoutError(
                 f"Connection to {self.ip}:{self.port} timed out") from e
         try:
-            serv_answer = await asyncio.wait_for(reader.read(1024), timeout)
+            serv_answer = await asyncio.wait_for(
+                reader.read(ProjectorProtocol.INITIAL_BUFFER_SIZE), timeout
+            )
             decode_answer = serv_answer.decode()
             rand_num = decode_answer.split(' ')[-1][0:-1]
             auth_data = f'{self.login}:{self.password}:{rand_num}'
             md5hash = hashlib.md5(auth_data.encode())
-            command = md5hash.hexdigest() + chr(48) + chr(48) + cmd + chr(13)
+            command = (
+                md5hash.hexdigest() +
+                ProjectorProtocol.PADDING_CHAR +
+                ProjectorProtocol.PADDING_CHAR +
+                cmd +
+                ProjectorProtocol.TERMINATOR
+            )
             writer.write(command.encode())
             await writer.drain()
-            answ = await asyncio.wait_for(reader.read(21), timeout)
+            answ = await asyncio.wait_for(
+                reader.read(ProjectorProtocol.RESPONSE_BUFFER_SIZE), timeout
+            )
             decode_answer = answ.decode()[2:-1]
         except asyncio.TimeoutError:
-            print('Connection timed out')
-            decode_answer = 'Timeout'
+            logger.warning(f'Connection timed out for {self.ip}')
+            decode_answer = ProjectorResponses.TIMEOUT
         except Exception as exc:
-            print('Connection error:', exc)
+            logger.error(f'Connection error for {self.ip}: {exc}')
             raise exc
         finally:
-            writer.close()
-            await writer.wait_closed()
+            if writer is not None:
+                writer.close()
+                await writer.wait_closed()
         return decode_answer
 
     async def get_info(self):
         try:
-            power = await self.send_cmd('QPW')
+            power = await self.send_cmd(ProjectorCommands.QUERY_POWER)
         except Exception as e:
-            print(f"Error getting power state: {e}")
+            logger.error(f"Error getting power state for {self.label}: {e}")
             return
         else:
-            if power == '001':
+            if power == ProjectorResponses.POWER_ON:
                 self.power = True
-                shutter = await self.send_cmd('QSH')
-                if shutter == '0':
+                shutter = await self.send_cmd(ProjectorCommands.QUERY_SHUTTER)
+                if shutter == ProjectorResponses.SHUTTER_OPEN:
                     self.shutter = self.SHUTTER_OPEN
-                elif shutter == '1':
+                elif shutter == ProjectorResponses.SHUTTER_CLOSED:
                     self.shutter = self.SHUTER_CLOSED
-            elif power == '000':
+            elif power == ProjectorResponses.POWER_OFF:
                 self.power = False
             else:
-                raise ValueError('Unknown power state')
+                raise ValueError(f'Unknown power state: {power}')
 
-        get_shutter_in = await self.send_cmd('QVX:SEFS1')
+        get_shutter_in = await self.send_cmd(ProjectorCommands.QUERY_SHUTTER_IN)
         answer_shutter_in_time = get_shutter_in.split('=')
         self.shutter_in_time = answer_shutter_in_time[1] if (
             len(answer_shutter_in_time) > 1) else 'None'
 
-        get_shutter_out = await self.send_cmd('QVX:SEFS2')
+        get_shutter_out = await self.send_cmd(ProjectorCommands.QUERY_SHUTTER_OUT)
         answer_shutter_out_time = get_shutter_out.split('=')
         self.shutter_out_time = answer_shutter_out_time[1] if (
             len(answer_shutter_out_time) > 1) else 'None'
 
     async def power_on(self):
-        await self.send_cmd('PON')
+        await self.send_cmd(ProjectorCommands.POWER_ON)
         self.power = True
 
     async def power_off(self):
-        await self.send_cmd('POF')
+        await self.send_cmd(ProjectorCommands.POWER_OFF)
         self.power = False
 
     async def shutter_open(self):
-        await self.send_cmd('OSH:0')
+        await self.send_cmd(ProjectorCommands.SHUTTER_OPEN)
         self.shutter = self.SHUTTER_OPEN
 
     async def shutter_close(self):
-        await self.send_cmd('OSH:1')
+        await self.send_cmd(ProjectorCommands.SHUTTER_CLOSE)
         self.shutter = self.SHUTER_CLOSED
 
     async def set_shutter_in(self, shutter_time):
-        await self.send_cmd(f'VXX:SEFS1={shutter_time}')
+        await self.send_cmd(ProjectorCommands.SET_SHUTTER_IN.format(shutter_time))
 
     async def set_shutter_out(self, shutter_time):
-        await self.send_cmd(f'VXX:SEFS2={shutter_time}')
+        await self.send_cmd(ProjectorCommands.SET_SHUTTER_OUT.format(shutter_time))
 
     def debug_info(self):
-        print(
-            f'''
+        """Вывести отладочную информацию о проекторе"""
+        info = f"""
     IP--------{self.ip}
     PORT------{self.port}
     LOGIN-----{self.login}
@@ -119,5 +138,5 @@ class Projector:
     SHUTTER---{self.shutter}
     SHUTTER_IN---{self.shutter_in_time}
     SHUTTER_OUT---{self.shutter_out_time}
-        '''
-        )
+        """
+        logger.debug(info)
