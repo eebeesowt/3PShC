@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple
 
 from infra.scene_repository import load_scene, save_scene_to_json
 from infra.settings_repository import create_projector_settings_dict
-from lib.projector import Projector
+from services.projector import Projector
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)

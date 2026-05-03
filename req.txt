@@ -1,2 +1,2 @@
-python-osc==1.9.3
-customtkinter==5.2.2
+dearpygui>=1.11,<3.0
+oscpy>=0.6.0

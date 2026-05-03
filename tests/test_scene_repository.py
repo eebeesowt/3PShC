@@ -7,7 +7,7 @@ import tempfile
 import pytest
 
 from infra.scene_repository import SCHEMA_VERSION, save_scene_to_json
-from lib.projector import Projector
+from services.projector import Projector
 
 
 def _make_projector(ip="192.168.1.10", label="Stage 1"):

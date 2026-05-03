@@ -1,88 +1,100 @@
-# Simple Panasonic Projector Shutter Controll via LAN Control Commands
+# Simple Panasonic Projector Shutter Control via LAN Control Commands
 
-Тестировалось на проекторах panasonic pt-rz970, pt-rz120
+Управление группами проекторов Panasonic по LAN: шаттер (`OSH`), питание (`PON/POF`),
+позиция/фокус/зум линзы (`VXX:LNS*`), aspect ratio, installation mode, тестовые
+паттерны. Дистанционное управление по OSC из Resolume Arena, TouchOSC и др.
 
-в папке doc, документация команд
+Тестировалось на Panasonic PT-RZ970, PT-RZ120. Документация команд — в `doc/`.
 
+## Стек
 
-Для запуска необходим [python](https://www.python.org/) и [виртуальное окружение](https://skillbox.ru/media/code/python-venv-chto-takoe-virtualnoe-okruzhenie-i-kak-im-polzovatsya/)
+- **UI:** [DearPyGui](https://github.com/hoffstadt/DearPyGui) — нативный GPU-ускоренный фреймворк.
+- **OSC:** [oscpy](https://github.com/kivy/oscpy) — быстрый OSC-сервер, работает в отдельном потоке.
+- **Сеть:** asyncio + TCP-клиент с MD5-handshake (требование протокола Panasonic).
+- **Python:** 3.9+
 
+## Установка
 
-Установка зависимостей
-```
+```bash
+python -m venv venv
+source venv/bin/activate
 pip install -r req.txt
+# или: pip install -e ".[dev]"   # с pytest
+```
 
-```
-после чего можно запустить приложение
-```
+## Запуск
+
+```bash
 python src/app.py
 ```
 
+## Конфигурация (env vars)
 
-## Форматы файлов конфигурации
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `PSHC_OSC_HOST` | `127.0.0.1` | OSC bind address |
+| `PSHC_OSC_PORT` | `7001` | OSC bind port |
+| `PSHC_PROJECTOR_PORT` | `1024` | TCP-порт проектора по умолчанию |
+| `PSHC_PROJECTOR_TIMEOUT` | `2` | Таймаут TCP-соединения, сек |
+| `PSHC_SETTINGS_DIR` | `src/data/settings` | Где хранятся настройки проекторов |
+| `PSHC_LOGS_DIR` | `src/logs` | Где хранится `app.log` |
 
-### JSON формат (рекомендуется)
-Сохраняет данные проекторов с их настройками в JSON формате:
+## OSC-роуты
+
+```
+/shutter/open/<room>     — открыть шаттер на проекторе с IP, оканчивающимся на <room>
+/shutter/close/<room>    — закрыть шаттер
+/shutter/group/open      — открыть на всех проекторах из группы
+/shutter/group/close     — закрыть на всех проекторах из группы
+```
+
+Пример: `/shutter/open/13` откроет шаттер на проекторе с IP `*.13` (например, `10.101.10.13`),
+если он добавлен в приложении.
+
+## Форматы файлов сцен
+
+### JSON (рекомендуется)
+
 ```json
 {
-  "window_size": {
-    "width": 1200,
-    "height": 800
-  },
+  "schema_version": 1,
+  "window_size": {"width": 1200, "height": 800},
   "projectors": [
     {
-      "ip": "10.101.10.126",
-      "port": 1024,
-      "username": "admin1",
-      "password": "panasonic",
-      "label": "Projector 1",
-      "position": {
-        "x": 50,
-        "y": 50
-      },
+      "ip": "10.101.10.126", "port": 1024,
+      "username": "admin1", "password": "panasonic",
+      "label": "Stage L",
+      "position": {"x": 50, "y": 50},
       "settings": {
-        "lens_settings": {
-          "h_position": "+00200",
-          "v_position": "+00100"
-        },
-        "display_settings": {
-          "aspect_ratio": "16:10",
-          "installation_mode": "Front/Desk"
-        }
+        "lens_settings": {"h_position": "+00200", "v_position": "+00100"},
+        "display_settings": {"aspect_ratio": "16:10", "installation_mode": "Front/Desk"}
       }
     }
   ]
 }
 ```
 
-При загрузке JSON файла настройки проектора (lens position, aspect ratio, installation mode) автоматически применяются!
+При загрузке сцены настройки (lens position, aspect ratio, installation mode)
+применяются автоматически: сначала линза в Home, ожидание стабилизации
+(polling), затем выставление позиции.
 
-### TXT формат (legacy)
+### TXT (legacy, deprecated)
+
 ```
 width,height
-IP,PORT,USERNAME,PASSWORD,LABEL,X,Y
 IP,PORT,USERNAME,PASSWORD,LABEL,X,Y
 ...
 ```
 
-Добавлена возможность управления программой из Resolume Arena
+Загрузка работает с предупреждением; сохранение в TXT отключено — пересохраните как `.json`.
 
-OSC
+## Тесты
 
-Настроено все под localhost port 7001 
-
-роуты: 
-
-```
-    "/shutter/open*",
-    "/shutter/close*",
-    "/shutter/group/open",
-    "/shutter/group/close",
+```bash
+pytest                          # все
+pytest tests/test_osc_server.py # только OSC
 ```
 
-пример сообщения:
-```
-    /shutter/open/13
-```
-открыть шаттер на проекторе с 13 на конце ip addr 
-(например 10.101.10.13, конечно такой проектор должен быть добавлен в программе на поле)
+## Структура проекта
+
+См. `CLAUDE.md` — там подробное описание слоёв и архитектуры.

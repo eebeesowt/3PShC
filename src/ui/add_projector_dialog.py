@@ -1,167 +1,114 @@
 """
-Диалоговое окно для добавления нового проектора.
-Использует CustomTkinter.
+Диалог «Add Projector» на DearPyGui. Модальное окно с полями
+IP / Port / Login / Password / Label и валидацией.
 """
-import asyncio
-import customtkinter as ctk
 from typing import Callable
-from lib.projector import Projector
-from theme import Theme
-from utils.validator import Validator
+
+import dearpygui.dearpygui as dpg
+
+from config import ProjectorConfig as ProjConfig
+from services.projector import Projector
+from ui.dpg_theme import ButtonThemes, Palette
 from utils.logger import setup_logger
+from utils.validator import Validator
 
 logger = setup_logger(__name__)
 
 
 class AddProjectorDialog:
-    """Диалог добавления проектора"""
-    
-    def __init__(self, parent, on_add: Callable[[Projector], None]):
+    """Модальное окно создания нового проектора."""
+
+    def __init__(self, on_add: Callable[[Projector], None]) -> None:
         self.on_add = on_add
-        
-        # Создание окна
-        self.window = ctk.CTkToplevel(parent)
-        self.window.title("Add Projector")
-        self.window.geometry("350x300")
-        
-        # Сообщение об ошибке
-        self.error_label = None
-        
-        self._create_widgets()
-    
-    def _create_widgets(self):
-        """Создать виджеты"""
-        # IP адрес
-        ctk.CTkLabel(self.window, text="IP Address:").grid(
-            row=0, column=0, padx=10, pady=5, sticky="w"
-        )
-        self.ip_entry = ctk.CTkEntry(self.window, width=200)
-        self.ip_entry.grid(row=0, column=1, padx=10, pady=5)
-        
-        # Порт
-        ctk.CTkLabel(self.window, text="Port:").grid(
-            row=1, column=0, padx=10, pady=5, sticky="w"
-        )
-        self.port_entry = ctk.CTkEntry(self.window, width=200)
-        self.port_entry.insert(0, "1024")  # Значение по умолчанию
-        self.port_entry.grid(row=1, column=1, padx=10, pady=5)
-        
-        # Имя пользователя
-        ctk.CTkLabel(self.window, text="Username:").grid(
-            row=2, column=0, padx=10, pady=5, sticky="w"
-        )
-        self.username_entry = ctk.CTkEntry(self.window, width=200)
-        self.username_entry.grid(row=2, column=1, padx=10, pady=5)
-        
-        # Пароль
-        ctk.CTkLabel(self.window, text="Password:").grid(
-            row=3, column=0, padx=10, pady=5, sticky="w"
-        )
-        self.password_entry = ctk.CTkEntry(self.window, width=200, show="*")
-        self.password_entry.grid(row=3, column=1, padx=10, pady=5)
-        
-        # Метка
-        ctk.CTkLabel(self.window, text="Label:").grid(
-            row=4, column=0, padx=10, pady=5, sticky="w"
-        )
-        self.label_entry = ctk.CTkEntry(self.window, width=200)
-        self.label_entry.grid(row=4, column=1, padx=10, pady=5)
-        
-        # Метка для ошибок
-        self.error_label = ctk.CTkLabel(
-            self.window,
-            text="",
-            text_color=Theme.DANGER_DARK,
-            wraplength=300
-        )
-        self.error_label.grid(row=5, column=0, columnspan=2, pady=5)
-        
-        # Кнопка добавления
-        self.add_button = ctk.CTkButton(
-            self.window,
-            text="Add Projector",
-            command=self._on_add_click,
-            fg_color=Theme.INFO,
-            hover_color=Theme.INFO_HOVER,
-            width=200
-        )
-        self.add_button.grid(row=6, column=0, columnspan=2, pady=10)
-    
-    def _show_error(self, message: str):
-        """Показать сообщение об ошибке"""
-        if self.error_label:
-            self.error_label.configure(text=message)
-            logger.warning(f"Validation error: {message}")
-    
-    def _clear_error(self):
-        """Очистить сообщение об ошибке"""
-        if self.error_label:
-            self.error_label.configure(text="")
-    
-    def _on_add_click(self):
-        """Обработчик нажатия кнопки Add"""
-        asyncio.create_task(self._async_add())
-    
-    async def _async_add(self):
-        """Асинхронное добавление проектора"""
-        self._clear_error()
-        
-        ip = self.ip_entry.get().strip()
-        port_str = self.port_entry.get().strip()
-        username = self.username_entry.get().strip()
-        password = self.password_entry.get().strip()
-        label = self.label_entry.get().strip()
-        
-        # Валидация IP
-        is_valid, error_msg = Validator.validate_ip(ip)
-        if not is_valid:
-            self._show_error(error_msg or "Invalid IP")
+        self.window_tag = dpg.generate_uuid()
+        self._ip_tag = dpg.generate_uuid()
+        self._port_tag = dpg.generate_uuid()
+        self._login_tag = dpg.generate_uuid()
+        self._password_tag = dpg.generate_uuid()
+        self._label_tag = dpg.generate_uuid()
+        self._error_tag = dpg.generate_uuid()
+        self._build()
+
+    def _build(self) -> None:
+        with dpg.window(
+            label="Add Projector",
+            tag=self.window_tag,
+            modal=True,
+            no_resize=True,
+            width=380,
+            height=320,
+            on_close=self.close,
+        ):
+            with dpg.group(horizontal=True):
+                dpg.add_text("IP:", indent=4)
+                dpg.add_input_text(tag=self._ip_tag, width=200, hint="10.0.0.10")
+            with dpg.group(horizontal=True):
+                dpg.add_text("Port:", indent=4)
+                dpg.add_input_text(
+                    tag=self._port_tag, width=200,
+                    default_value=str(ProjConfig.DEFAULT_PORT),
+                )
+            with dpg.group(horizontal=True):
+                dpg.add_text("Login:", indent=4)
+                dpg.add_input_text(tag=self._login_tag, width=200,
+                                   default_value="admin1")
+            with dpg.group(horizontal=True):
+                dpg.add_text("Password:", indent=4)
+                dpg.add_input_text(tag=self._password_tag, width=200,
+                                   default_value="panasonic", password=True)
+            with dpg.group(horizontal=True):
+                dpg.add_text("Label:", indent=4)
+                dpg.add_input_text(tag=self._label_tag, width=200,
+                                   hint="(optional)")
+
+            dpg.add_separator()
+            dpg.add_text("", tag=self._error_tag, color=Palette.DANGER_DARK)
+
+            with dpg.group(horizontal=True):
+                add_btn = dpg.add_button(label="Add", width=160, height=32,
+                                         callback=self._submit)
+                dpg.bind_item_theme(add_btn, ButtonThemes.get('primary'))
+                cancel_btn = dpg.add_button(label="Cancel", width=160, height=32,
+                                            callback=self.close)
+                dpg.bind_item_theme(cancel_btn, ButtonThemes.get('danger'))
+
+    def _submit(self) -> None:
+        ip = dpg.get_value(self._ip_tag).strip()
+        port_str = dpg.get_value(self._port_tag).strip()
+        login = dpg.get_value(self._login_tag).strip()
+        password = dpg.get_value(self._password_tag)
+        label = dpg.get_value(self._label_tag).strip()
+
+        ok, err = Validator.validate_ip(ip)
+        if not ok:
+            self._show_error(err or "Invalid IP")
             return
-        
-        # Валидация порта
-        is_valid, error_msg, port = Validator.validate_port(port_str)
-        if not is_valid:
-            self._show_error(error_msg or "Invalid port")
+        ok, err, port = Validator.validate_port(port_str)
+        if not ok:
+            self._show_error(err or "Invalid port")
             return
-        
-        # Валидация обязательных полей
-        is_valid, error_msg = Validator.validate_required(username, "Username")
-        if not is_valid:
-            self._show_error(error_msg or "Username required")
+        ok, err = Validator.validate_required(login, "Login")
+        if not ok:
+            self._show_error(err or "Login required")
             return
-        
-        is_valid, error_msg = Validator.validate_required(password, "Password")
-        if not is_valid:
-            self._show_error(error_msg or "Password required")
-            return
-        
-        # Блокировка кнопки во время создания
-        self.add_button.configure(state="disabled", text="Adding...")
-        
-        # Создание проектора
+
         try:
-            logger.info(f"Creating new projector {ip}:{port}")
-            new_projector = Projector(
-                ip=ip,
-                port=port,
-                login=username,
-                password=password,
-                label=label if label else ip,
-                id=0  # ID будет установлен контроллером
+            projector = Projector(
+                ip=ip, port=port, login=login, password=password,
+                label=label or ip, id=0,
             )
-            
-            # Получить информацию о проекторе
-            await new_projector.get_info()
-            
-            # Вызвать callback
-            self.on_add(new_projector)
-            
-            logger.info(f"Successfully added projector {new_projector.label}")
-            
-            # Закрыть окно
-            self.window.destroy()
-            
-        except Exception as e:
-            logger.error(f"Error creating projector: {e}")
-            self._show_error(f"Connection error: {str(e)}")
-            self.add_button.configure(state="normal", text="Add Projector")
+        except Exception as exc:
+            logger.error(f"Could not create projector: {exc}")
+            self._show_error(str(exc))
+            return
+
+        self.on_add(projector)
+        self.close()
+
+    def _show_error(self, msg: str) -> None:
+        if dpg.does_item_exist(self._error_tag):
+            dpg.set_value(self._error_tag, msg)
+
+    def close(self) -> None:
+        if dpg.does_item_exist(self.window_tag):
+            dpg.delete_item(self.window_tag)

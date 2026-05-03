@@ -1,11 +1,11 @@
 [project]
 name = "3pshc"
-version = "0.2.0"
+version = "0.3.0"
 description = "3P Shutter Control — управление проекторами Panasonic по LAN с OSC из Resolume Arena"
 requires-python = ">=3.9"
 dependencies = [
-    "python-osc==1.9.3",
-    "customtkinter==5.2.2",
+    "dearpygui>=1.11,<3.0",
+    "oscpy>=0.6.0",
 ]
 
 [project.optional-dependencies]

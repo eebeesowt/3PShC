@@ -5,7 +5,7 @@
 import asyncio
 from typing import List, Optional
 
-from lib.projector import Projector
+from services.projector import Projector
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
