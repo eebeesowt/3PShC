@@ -1,0 +1,50 @@
+{
+  "window_size": {
+    "width": 1200,
+    "height": 800
+  },
+  "projectors": [
+    {
+      "ip": "10.101.10.126",
+      "port": 1024,
+      "username": "admin1",
+      "password": "panasonic",
+      "label": "Projector 1",
+      "position": {
+        "x": 50,
+        "y": 50
+      },
+      "settings": {
+        "lens_settings": {
+          "h_position": "+00200",
+          "v_position": "+00100"
+        },
+        "display_settings": {
+          "aspect_ratio": "16:10",
+          "installation_mode": "Front/Desk"
+        }
+      }
+    },
+    {
+      "ip": "10.101.10.127",
+      "port": 1024,
+      "username": "admin1",
+      "password": "panasonic",
+      "label": "Projector 2",
+      "position": {
+        "x": 250,
+        "y": 50
+      },
+      "settings": {
+        "lens_settings": {
+          "h_position": "-00150",
+          "v_position": "+00200"
+        },
+        "display_settings": {
+          "aspect_ratio": "16:9",
+          "installation_mode": "Front/Ceiling"
+        }
+      }
+    }
+  ]
+}

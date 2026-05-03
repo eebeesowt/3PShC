@@ -6,6 +6,7 @@ import asyncio
 from typing import Callable, Optional
 from pythonosc.osc_server import AsyncIOOSCUDPServer
 from pythonosc.dispatcher import Dispatcher
+from config import OSCConfig
 from lib.constants import OSCMessages
 from utils.logger import setup_logger
 
@@ -14,14 +15,14 @@ logger = setup_logger(__name__)
 
 class OSCController:
     """Управление OSC сервером"""
-    
+
     def __init__(
         self,
-        host: str = '127.0.0.1',
-        port: int = 7001
+        host: Optional[str] = None,
+        port: Optional[int] = None,
     ):
-        self.host = host
-        self.port = port
+        self.host = host if host is not None else OSCConfig.HOST
+        self.port = port if port is not None else OSCConfig.PORT
         self.dispatcher = Dispatcher()
         self.server: Optional[AsyncIOOSCUDPServer] = None
         self.transport = None

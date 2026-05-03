@@ -19,7 +19,45 @@ python src/app.py
 ```
 
 
-Сохраняет данные проекторов и координаты в формате:
+## Форматы файлов конфигурации
+
+### JSON формат (рекомендуется)
+Сохраняет данные проекторов с их настройками в JSON формате:
+```json
+{
+  "window_size": {
+    "width": 1200,
+    "height": 800
+  },
+  "projectors": [
+    {
+      "ip": "10.101.10.126",
+      "port": 1024,
+      "username": "admin1",
+      "password": "panasonic",
+      "label": "Projector 1",
+      "position": {
+        "x": 50,
+        "y": 50
+      },
+      "settings": {
+        "lens_settings": {
+          "h_position": "+00200",
+          "v_position": "+00100"
+        },
+        "display_settings": {
+          "aspect_ratio": "16:10",
+          "installation_mode": "Front/Desk"
+        }
+      }
+    }
+  ]
+}
+```
+
+При загрузке JSON файла настройки проектора (lens position, aspect ratio, installation mode) автоматически применяются!
+
+### TXT формат (legacy)
 ```
 width,height
 IP,PORT,USERNAME,PASSWORD,LABEL,X,Y

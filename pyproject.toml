@@ -1,0 +1,18 @@
+[project]
+name = "3pshc"
+version = "0.2.0"
+description = "3P Shutter Control — управление проекторами Panasonic по LAN с OSC из Resolume Arena"
+requires-python = ">=3.9"
+dependencies = [
+    "python-osc==1.9.3",
+    "customtkinter==5.2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

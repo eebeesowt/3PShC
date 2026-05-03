@@ -1,18 +1,33 @@
-# Ignore build and temporary files
+# Build / temp
 dist/
 build/
 tmp/
 *.tmp
 
-
-# Ignore environment files
+# Virtualenvs / env
 venv/
+.venv/
+.env
 .env.local
 
-# Ignore IDE specific files
+# IDE
 .vscode/
 .idea/
 *.iml
 
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Runtime data — not tracked
+src/logs/*.log
+src/data/settings/*.json
+.omc/
+
+# Misc
 teset.txt

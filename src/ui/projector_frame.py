@@ -8,6 +8,7 @@ from typing import Callable, Optional
 from lib.projector import Projector
 from theme import Theme, AppConfig
 from ui.widget_factory import WidgetFactory
+from ui.projector_settings_dialog import ProjectorSettingsDialog
 from utils.logger import setup_logger
 from utils.async_helpers import handle_async_errors, run_async
 
@@ -78,6 +79,16 @@ class ProjectorFrame:
             hover_color=Theme.PRIMARY_HOVER
         )
         
+        # Кнопка настроек
+        self.settings_btn = WidgetFactory.create_action_button(
+            self.frame,
+            text='⚙',
+            command=self._on_settings,
+            button_type='info',
+            width=AppConfig.BUTTON_WIDTH_SMALL,
+            height=AppConfig.BUTTON_HEIGHT_SMALL
+        )
+        
         # Кнопка удаления
         self.close_btn = WidgetFactory.create_action_button(
             self.frame,
@@ -131,21 +142,26 @@ class ProjectorFrame:
         )
     
     def _layout_widgets(self):
-        """Разместить виджеты в сетке"""
+        """Разместить виджеты в сетке - компактный квадратный формат"""
+        # Строка 0: Индикатор питания, название, кнопки управления
         self.power_status.grid(row=0, column=0, pady=2, padx=2)
-        self.label.grid(row=0, column=1, pady=2, padx=(2, 6), sticky="w")
-        self.group.grid(row=0, column=2, pady=2, padx=2)
-        self.close_btn.grid(row=0, column=3, pady=2, padx=2)
+        self.label.grid(row=0, column=1, pady=2, padx=2, sticky="w", columnspan=2)
+        self.settings_btn.grid(row=0, column=3, pady=2, padx=2)
+        self.close_btn.grid(row=0, column=4, pady=2, padx=2)
         
-        self.shutter_on_btn.grid(row=1, column=0, pady=2)
-        self.shutter_off_btn.grid(row=1, column=1, pady=2)
-        self.screen_status.grid(row=1, column=2, pady=2)
+        # Строка 1: Кнопки Open/Close и статус
+        self.shutter_on_btn.grid(row=1, column=0, pady=2, padx=2, columnspan=2)
+        self.shutter_off_btn.grid(row=1, column=2, pady=2, padx=2, columnspan=2)
+        self.screen_status.grid(row=1, column=4, pady=2, padx=2)
         
+        # Строка 2: Выпадающие списки времени и чекбокс группы
         if self.shutter_in_menu:
-            self.shutter_in_menu.grid(row=2, column=0, pady=2)
+            self.shutter_in_menu.grid(row=2, column=0, pady=2, padx=2, columnspan=2)
         
         if self.shutter_out_menu:
-            self.shutter_out_menu.grid(row=2, column=1, pady=2)
+            self.shutter_out_menu.grid(row=2, column=2, pady=2, padx=2, columnspan=2)
+        
+        self.group.grid(row=2, column=4, pady=2, padx=2)
     
     def _setup_bindings(self):
         """Настроить события перетаскивания"""
@@ -217,6 +233,13 @@ class ProjectorFrame:
             time_value = selected_time or self.shutter_out_menu.get()
             logger.info(f"Setting shutter out time to {time_value} for {self.projector.label}")
             run_async(self.projector.set_shutter_out(time_value))
+    
+    def _on_settings(self):
+        """Обработчик открытия настроек проектора"""
+        logger.info(f"Opening settings for {self.projector.label}")
+        # Открыть диалог настроек
+        settings_dialog = ProjectorSettingsDialog(self.frame, self.projector)
+        settings_dialog.focus()
     
     def _on_close(self):
         """Обработчик удаления фрейма"""
