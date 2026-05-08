@@ -25,7 +25,7 @@ from services.projector import Projector
 from services.projector_service import ProjectorService
 from services.scene_service import SceneService
 from ui.add_projector_dialog import AddProjectorDialog
-from ui.dpg_theme import ButtonThemes, Palette, install_global_theme
+from ui.dpg_theme import ButtonThemes, Palette, install_default_font, install_global_theme
 from ui.file_dialogs import save_scene_dialog, load_scene_dialog
 from ui.projector_card import CARD_HEIGHT, CARD_WIDTH, ProjectorCard
 from ui.settings_dialog import ProjectorSettingsDialog
@@ -35,9 +35,10 @@ logger = setup_logger(__name__)
 
 
 VIEWPORT_TITLE = "3P Shutter Control"
-VIEWPORT_WIDTH = 1100
-VIEWPORT_HEIGHT = 720
-TOOLBAR_HEIGHT = 70
+VIEWPORT_WIDTH = 900
+VIEWPORT_HEIGHT = 600
+MENU_BAR_HEIGHT = 22
+TOOLBAR_HEIGHT = 56
 FRAME_INTERVAL = 1 / 60
 
 
@@ -86,18 +87,35 @@ class AppWindow:
 
     def _setup_dpg(self) -> None:
         dpg.create_context()
+        install_default_font()
         install_global_theme()
         dpg.create_viewport(
             title=VIEWPORT_TITLE,
             width=VIEWPORT_WIDTH,
             height=VIEWPORT_HEIGHT,
         )
-        dpg.set_viewport_resize_callback(self._on_viewport_resize)
         dpg.setup_dearpygui()
+        self._build_menu_bar()
         self._build_toolbar()
         dpg.show_viewport()
 
+    def _build_menu_bar(self) -> None:
+        """Глобальные действия — File / All. Не занимает место в основной зоне."""
+        with dpg.viewport_menu_bar(tag="menu_bar"):
+            with dpg.menu(label="File"):
+                dpg.add_menu_item(label="Add Projector...", callback=self._on_add_projector)
+                dpg.add_separator()
+                dpg.add_menu_item(label="Load Scene...", callback=self._on_load_scene)
+                dpg.add_menu_item(label="Save Scene...", callback=self._on_save_scene)
+            with dpg.menu(label="All"):
+                dpg.add_menu_item(label="Power On all", callback=self._on_power_on_all)
+                dpg.add_menu_item(label="Power Off all", callback=self._on_power_off_all)
+
     def _build_toolbar(self) -> None:
+        """Островок с крупными Open/Close Group + Refresh. autosize чтобы
+        окно не растягивалось во всю ширину viewport — фон вокруг остаётся
+        пустым, кнопки выглядят как сгруппированный блок.
+        """
         with dpg.window(
             tag="toolbar",
             no_title_bar=True,
@@ -105,25 +123,17 @@ class AppWindow:
             no_resize=True,
             no_collapse=True,
             no_scrollbar=True,
-            pos=[0, 0],
-            width=VIEWPORT_WIDTH,
-            height=TOOLBAR_HEIGHT,
+            autosize=True,
+            pos=[8, MENU_BAR_HEIGHT + 4],
         ):
             with dpg.group(horizontal=True):
-                self._add_button("Add Projector", self._on_add_projector, 'info', width=130)
-                self._add_button("Load Scene", self._on_load_scene, 'success', width=110)
-                self._add_button("Save Scene", self._on_save_scene, 'success_dark', width=110)
-                dpg.add_spacer(width=18)
-                self._add_button("Update", self._on_update, 'warning', width=90)
-                dpg.add_spacer(width=18)
-                self._add_button("Power All On", self._on_power_on_all, 'success_dark', width=120)
-                self._add_button("Power All Off", self._on_power_off_all, 'danger_dark', width=120)
-
-            with dpg.group(horizontal=True):
                 self._add_button("Open Group", self._on_open_group, 'primary',
-                                 width=140, height=34)
+                                 width=160, height=36)
                 self._add_button("Close Group", self._on_close_group, 'danger',
-                                 width=140, height=34)
+                                 width=160, height=36)
+                dpg.add_spacer(width=12)
+                self._add_button("Refresh", self._on_update, 'warning',
+                                 width=110, height=36)
 
     def _add_button(
         self, label: str, callback: Callable, theme: str,
@@ -132,10 +142,6 @@ class AppWindow:
         btn = dpg.add_button(label=label, callback=callback, width=width, height=height)
         dpg.bind_item_theme(btn, ButtonThemes.get(theme))
         return btn
-
-    def _on_viewport_resize(self) -> None:
-        if dpg.does_item_exist("toolbar"):
-            dpg.set_item_width("toolbar", dpg.get_viewport_client_width())
 
     # ---- OSC ----
 
@@ -164,8 +170,18 @@ class AppWindow:
     # ---- Карточки ----
 
     def _on_add_projector(self) -> None:
-        dialog = AddProjectorDialog(on_add=self._add_projector_from_dialog)
+        dialog = AddProjectorDialog(
+            on_add=self._add_projector_from_dialog,
+            on_close=self._forget_dialog,
+        )
         self._open_dialogs.append(dialog)
+
+    def _forget_dialog(self, dialog: Any) -> None:
+        """Колбэк, который дёргают диалоги при закрытии — снимаем ссылку,
+        чтобы _open_dialogs не превращался в утечку за время сессии.
+        """
+        if dialog in self._open_dialogs:
+            self._open_dialogs.remove(dialog)
 
     def _add_projector_from_dialog(self, projector: Projector) -> None:
         if not self.controller.add_projector(projector):
@@ -190,7 +206,7 @@ class AppWindow:
         col = self._next_grid_index % 3
         row = self._next_grid_index // 3
         x = 10 + col * (CARD_WIDTH + 12)
-        y = TOOLBAR_HEIGHT + 10 + row * (CARD_HEIGHT + 12)
+        y = MENU_BAR_HEIGHT + TOOLBAR_HEIGHT + 10 + row * (CARD_HEIGHT + 12)
         card.set_position(x, y)
         self._next_grid_index += 1
 
@@ -204,6 +220,7 @@ class AppWindow:
         dialog = ProjectorSettingsDialog(
             projector=card.projector,
             run_task=self._create_task,
+            on_close=self._forget_dialog,
         )
         self._open_dialogs.append(dialog)
 

@@ -18,6 +18,11 @@ class ProjectorClient:
 
     def __init__(self, config: ProjectorConfig) -> None:
         self._config = config
+        # Panasonic NTCONTROL держит одну control-сессию: параллельные коннекты
+        # ловят ER401 / закрытие. Лок сериализует команды на проектор; разные
+        # проекторы остаются независимыми. Создаём лениво — иначе на 3.9
+        # asyncio.Lock() в sync-__init__ может пожаловаться на отсутствие loop.
+        self._send_lock: Optional[asyncio.Lock] = None
 
     async def send_raw(
         self,
@@ -29,7 +34,16 @@ class ProjectorClient:
 
         При таймауте чтения возвращает ProjectorResponses.TIMEOUT (строка).
         При ошибке соединения пробрасывает asyncio.TimeoutError или Exception.
+
+        Сериализован per-projector локом — две одновременные команды на один
+        IP не пересекаются (это требование Panasonic NTCONTROL).
         """
+        if self._send_lock is None:
+            self._send_lock = asyncio.Lock()
+        async with self._send_lock:
+            return await self._send_unlocked(cmd, timeout)
+
+    async def _send_unlocked(self, cmd: str, timeout: float) -> str:
         writer: Optional[asyncio.StreamWriter] = None
         try:
             reader, writer = await asyncio.wait_for(

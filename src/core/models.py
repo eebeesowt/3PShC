@@ -52,6 +52,13 @@ class ProjectorState:
     group: bool = False
     lens_position: LensPosition = field(default_factory=LensPosition)
     display_settings: DisplaySettings = field(default_factory=DisplaySettings)
+    # Идентификация (заполняется однократно при первом успешном refresh_info).
+    model: Optional[str] = None
+    serial: Optional[str] = None
+    firmware: Optional[str] = None
+    # Флаг «попытка опросить QID/QSN/SVRS уже была» — чтобы refresh_info не
+    # спамил identity-запросами на устройстве, где QID всегда отвечает ER.
+    identity_attempted: bool = False
 
 
 @dataclass

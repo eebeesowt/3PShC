@@ -2,7 +2,7 @@
 Диалог «Add Projector» на DearPyGui. Модальное окно с полями
 IP / Port / Login / Password / Label и валидацией.
 """
-from typing import Callable
+from typing import Callable, Optional
 
 import dearpygui.dearpygui as dpg
 
@@ -18,8 +18,13 @@ logger = setup_logger(__name__)
 class AddProjectorDialog:
     """Модальное окно создания нового проектора."""
 
-    def __init__(self, on_add: Callable[[Projector], None]) -> None:
+    def __init__(
+        self,
+        on_add: Callable[[Projector], None],
+        on_close: Optional[Callable[["AddProjectorDialog"], None]] = None,
+    ) -> None:
         self.on_add = on_add
+        self._on_close = on_close
         self.window_tag = dpg.generate_uuid()
         self._ip_tag = dpg.generate_uuid()
         self._port_tag = dpg.generate_uuid()
@@ -112,3 +117,8 @@ class AddProjectorDialog:
     def close(self) -> None:
         if dpg.does_item_exist(self.window_tag):
             dpg.delete_item(self.window_tag)
+        if self._on_close is not None:
+            try:
+                self._on_close(self)
+            except Exception as exc:
+                logger.warning(f"on_close callback raised: {exc}")

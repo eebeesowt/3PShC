@@ -2,7 +2,15 @@
 DearPyGui-темы и палитра. Заменяет CustomTkinter-тему на нативные
 mvThemeColor/mvThemeStyle. Создаются один раз при старте приложения.
 """
+import os
+import sys
+from typing import List, Optional
+
 import dearpygui.dearpygui as dpg
+
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class Palette:
@@ -104,3 +112,48 @@ class ButtonThemes:
     def reset(cls) -> None:
         """Очистить кэш — обязательно при destroy_context()."""
         cls._cache.clear()
+
+
+# ---- Шрифт ----
+
+def _font_candidates() -> List[str]:
+    """Кандидаты системных TTF с поддержкой стрелок и кириллицы."""
+    if sys.platform == "darwin":
+        return [
+            "/System/Library/Fonts/SFNS.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            "/System/Library/Fonts/Geneva.ttf",
+        ]
+    if sys.platform == "win32":
+        return [
+            "C:/Windows/Fonts/segoeui.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+            "C:/Windows/Fonts/tahoma.ttf",
+        ]
+    return [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ]
+
+
+def install_default_font(size: int = 16) -> Optional[int]:
+    """Загрузить TTF с глифами стрелок (U+2190–21FF), геометрических фигур
+    (U+25A0–25FF) и кириллицы. DPG по умолчанию подгружает только Latin, поэтому
+    дополнительные диапазоны нужно регистрировать явно — иначе ↑↓←→ и кириллица
+    рендерятся как «?».
+    """
+    path = next((p for p in _font_candidates() if os.path.exists(p)), None)
+    if path is None:
+        logger.warning("No system TTF found; arrows and Cyrillic will render as '?'")
+        return None
+
+    with dpg.font_registry():
+        with dpg.font(path, size) as font_id:
+            dpg.add_font_range_hint(dpg.mvFontRangeHint_Default)
+            dpg.add_font_range_hint(dpg.mvFontRangeHint_Cyrillic)
+            dpg.add_font_range(0x2190, 0x21FF)  # arrows
+            dpg.add_font_range(0x2500, 0x25FF)  # box drawing + geometric (●▲▼)
+    dpg.bind_font(font_id)
+    logger.info(f"Loaded UI font: {path}")
+    return font_id

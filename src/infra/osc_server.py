@@ -19,7 +19,6 @@ from typing import Callable, Dict, List, Optional
 from oscpy.server import OSCThreadServer
 
 from config import OSCConfig
-from core.constants import OSCMessages
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -90,28 +89,39 @@ class OSCController:
         """Колбэк oscpy. Парсит адрес и эмитит событие в asyncio-loop."""
         addr = address.decode() if isinstance(address, (bytes, bytearray)) else address
 
-        # TouchOSC: 3 = button press. Resolume и др. могут слать без аргументов.
-        # Принимаем оба случая; явный button-up (значение 0) отфильтровываем.
-        if args and args[0] not in (OSCMessages.MESSAGE_TYPE_BUTTON, 1, 1.0):
-            logger.debug(f"OSC: ignoring {addr} args={args}")
+        # Резолом и большинство клиентов шлют сообщение без аргументов; TouchOSC
+        # шлёт 1 на нажатие и 0 на отпускание. Принимаем пусто или truthy,
+        # явный 0/0.0 (button release) — отбрасываем.
+        if args and not args[0]:
+            logger.debug(f"OSC: ignoring release {addr} args={args}")
             return
 
-        if addr.startswith('/shutter/group/open'):
-            logger.info("OSC: group open")
-            self._emit(OSCEvent.GROUP_OPEN)
-        elif addr.startswith('/shutter/group/close'):
-            logger.info("OSC: group close")
-            self._emit(OSCEvent.GROUP_CLOSE)
-        elif addr.startswith('/shutter/open'):
-            room = addr.rsplit('/', 1)[-1]
-            logger.info(f"OSC: open shutter for room {room}")
-            self._emit(OSCEvent.SHUTTER_OPEN, room)
-        elif addr.startswith('/shutter/close'):
-            room = addr.rsplit('/', 1)[-1]
-            logger.info(f"OSC: close shutter for room {room}")
-            self._emit(OSCEvent.SHUTTER_CLOSE, room)
-        else:
+        parts = addr.strip('/').split('/')
+        if len(parts) < 2 or parts[0] != 'shutter':
             logger.debug(f"OSC: no route for {addr}")
+            return
+
+        # /shutter/group/open|close
+        if parts[1] == 'group' and len(parts) == 3:
+            if parts[2] == 'open':
+                logger.info("OSC: group open")
+                self._emit(OSCEvent.GROUP_OPEN)
+            elif parts[2] == 'close':
+                logger.info("OSC: group close")
+                self._emit(OSCEvent.GROUP_CLOSE)
+            else:
+                logger.debug(f"OSC: no route for {addr}")
+            return
+
+        # /shutter/open|close/<room>
+        if parts[1] in ('open', 'close') and len(parts) == 3:
+            room = parts[2]
+            event = OSCEvent.SHUTTER_OPEN if parts[1] == 'open' else OSCEvent.SHUTTER_CLOSE
+            logger.info(f"OSC: {parts[1]} shutter for room {room}")
+            self._emit(event, room)
+            return
+
+        logger.debug(f"OSC: no route for {addr}")
 
     def _emit(self, event: str, *args) -> None:
         """Перенести вызов всех подписчиков в основной asyncio-loop."""

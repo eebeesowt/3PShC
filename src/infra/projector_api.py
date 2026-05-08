@@ -11,7 +11,7 @@ from core.constants import (
     ProjectorResponses,
     ProjectorStates,
 )
-from core.models import LensPosition, ProjectorState
+from core.models import LensPosition, ProjectorConfig, ProjectorState
 from infra.projector_client import ProjectorClient
 from utils.logger import setup_logger
 
@@ -21,18 +21,29 @@ logger = setup_logger(__name__)
 class ProjectorApi:
     """Команды протокола Panasonic, обновляющие ProjectorState."""
 
-    def __init__(self, client: ProjectorClient, state: ProjectorState) -> None:
+    def __init__(
+        self,
+        config: ProjectorConfig,
+        client: ProjectorClient,
+        state: ProjectorState,
+    ) -> None:
+        self._config = config
         self._client = client
         self._state = state
 
     @property
     def label(self) -> str:
-        return self._client._config.display_label  # type: ignore[attr-defined]
+        return self._config.display_label
 
     # --- Базовое состояние ---
 
     async def refresh_info(self) -> None:
-        """Обновить power/shutter/shutter_in/out из проектора."""
+        """Обновить power/shutter/shutter_in/out из проектора.
+
+        Дополнительно: при первом успешном вызове подтягивает идентификацию
+        (model/serial/firmware) — она не меняется в рантайме, поэтому опрос
+        делается один раз и кешируется в state.
+        """
         try:
             power = await self._client.send_raw(ProjectorCommands.QUERY_POWER)
         except Exception as exc:
@@ -58,6 +69,66 @@ class ProjectorApi:
         get_out = await self._client.send_raw(ProjectorCommands.QUERY_SHUTTER_OUT)
         out_parts = get_out.split('=')
         self._state.shutter_out_time = out_parts[1] if len(out_parts) > 1 else 'None'
+
+        if not self._state.identity_attempted:
+            await self.refresh_identity()
+
+    @staticmethod
+    def _is_valid_response(resp: str) -> bool:
+        """Ответ полезный, если не пуст, не 'ER*' (unsupported) и не таймаут."""
+        if not resp:
+            return False
+        upper = resp.upper()
+        return not upper.startswith('ER') and resp != ProjectorResponses.TIMEOUT
+
+    async def refresh_identity(self) -> None:
+        """Запросить QID (model), QSN (serial), QVX:SVRS0 или SVRSE (firmware).
+        Тихо игнорирует частичные ошибки — поля либо заполняются, либо
+        остаются None. По завершению (даже при провале) ставит
+        identity_attempted=True, чтобы refresh_info не повторял запрос.
+        """
+        try:
+            try:
+                model = await self._client.send_raw(ProjectorCommands.QUERY_MODEL)
+                model = model.strip()
+                if self._is_valid_response(model):
+                    self._state.model = model
+            except Exception as exc:
+                logger.warning(f"Could not read model for {self.label}: {exc}")
+
+            try:
+                serial = await self._client.send_raw(ProjectorCommands.QUERY_SERIAL)
+                serial = serial.strip()
+                if self._is_valid_response(serial):
+                    self._state.serial = serial
+            except Exception as exc:
+                logger.warning(f"Could not read serial for {self.label}: {exc}")
+
+            # Firmware: SVRS0 на RZ120/RQ25K, SVRSE на RQ7-series. Пробуем SVRS0
+            # первым — если ER или Timeout, падаем на SVRSE.
+            for cmd in (ProjectorCommands.QUERY_FIRMWARE_MAIN,
+                        ProjectorCommands.QUERY_FIRMWARE_GENERIC):
+                try:
+                    fw = await self._client.send_raw(cmd)
+                except Exception as exc:
+                    logger.warning(f"Firmware query {cmd} failed for {self.label}: {exc}")
+                    continue
+                fw = fw.strip()
+                if self._is_valid_response(fw):
+                    # 'SVRS0=1.00.01' / 'SVRSE=1.00' → правая часть.
+                    self._state.firmware = fw.split('=')[-1] if '=' in fw else fw
+                    break
+
+            if self._state.model:
+                family = ProjectorStates.detect_family(self._state.model)
+                profile = ProjectorStates.detect_input_profile(self._state.model)
+                logger.info(
+                    f"Identified {self.label}: model={self._state.model} "
+                    f"serial={self._state.serial} fw={self._state.firmware} "
+                    f"family={family} input_profile={profile}"
+                )
+        finally:
+            self._state.identity_attempted = True
 
     # --- Питание ---
 
@@ -246,6 +317,56 @@ class ProjectorApi:
         logger.debug(f"Setting installation mode for {self.label}: {cmd}")
         await self._client.send_raw(cmd)
 
+    # --- Источник сигнала / Freeze / OSD / Geometry ---
+
+    async def get_input_source(self) -> str:
+        """Вернуть сабкод (e.g. 'HD1') либо сырой ответ, если не распознан."""
+        result = await self._client.send_raw(ProjectorCommands.QUERY_INPUT)
+        return result.strip()
+
+    async def set_input_source(self, name: str) -> None:
+        if name not in ProjectorStates.INPUT_SOURCES:
+            raise ValueError(f"Invalid input source: {name}")
+        code = ProjectorStates.INPUT_SOURCES[name]
+        await self._client.send_raw(ProjectorCommands.SET_INPUT.format(code))
+
+    async def get_freeze(self) -> Optional[bool]:
+        result = await self._client.send_raw(ProjectorCommands.QUERY_FREEZE)
+        result = result.strip()
+        if result == '0':
+            return False
+        if result == '1':
+            return True
+        return None
+
+    async def set_freeze(self, frozen: bool) -> None:
+        cmd = ProjectorCommands.FREEZE_ON if frozen else ProjectorCommands.FREEZE_OFF
+        await self._client.send_raw(cmd)
+
+    async def get_osd(self) -> Optional[bool]:
+        result = await self._client.send_raw(ProjectorCommands.QUERY_OSD)
+        result = result.strip()
+        if result == '0':
+            return False
+        if result == '1':
+            return True
+        return None
+
+    async def set_osd(self, on: bool) -> None:
+        cmd = ProjectorCommands.OSD_ON if on else ProjectorCommands.OSD_OFF
+        await self._client.send_raw(cmd)
+
+    async def get_geometry(self) -> str:
+        """Сырой код от QVX:GMMI0 (например '+00000' или 'GMMI0=+00000')."""
+        result = await self._client.send_raw(ProjectorCommands.QUERY_GEOMETRY)
+        return result.split('=')[-1].strip() if '=' in result else result.strip()
+
+    async def set_geometry(self, mode_name: str) -> None:
+        if mode_name not in ProjectorStates.GEOMETRY_MODES:
+            raise ValueError(f"Invalid geometry mode: {mode_name}")
+        code = ProjectorStates.GEOMETRY_MODES[mode_name]
+        await self._client.send_raw(ProjectorCommands.SET_GEOMETRY.format(code))
+
     # --- Высокоуровневые сценарии ---
 
     async def apply_saved_settings(self, settings: dict) -> None:
@@ -311,8 +432,10 @@ class ProjectorApi:
 
         return {
             'lens_settings': {
-                'h_position': lp.h if lp.h else '0',
-                'v_position': lp.v if lp.v else '0',
+                # '---' — sentinel: apply_saved_settings пропустит шаг и не уведёт
+                # линзу в (0,0), если опрос не удался.
+                'h_position': lp.h if lp.h else '---',
+                'v_position': lp.v if lp.v else '---',
             },
             'display_settings': {
                 'aspect_ratio': aspect_ratio,

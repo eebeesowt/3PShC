@@ -1,10 +1,23 @@
 # Simple Panasonic Projector Shutter Control via LAN Control Commands
 
 Управление группами проекторов Panasonic по LAN: шаттер (`OSH`), питание (`PON/POF`),
-позиция/фокус/зум линзы (`VXX:LNS*`), aspect ratio, installation mode, тестовые
-паттерны. Дистанционное управление по OSC из Resolume Arena, TouchOSC и др.
+позиция/фокус/зум линзы (`VXX:LNS*`), aspect ratio (`VSF`), installation mode (`OIL`),
+тестовые паттерны (`OTS`), выбор входа (`IIS`), Freeze (`OFZ`), OSD (`OOS`),
+геометрия (`VXX:GMMI0`), идентификация модели (`QID`/`QSN`).
+Дистанционное управление по OSC из Resolume Arena, TouchOSC и др.
 
-Тестировалось на Panasonic PT-RZ970, PT-RZ120. Документация команд — в `doc/`.
+Поддерживаются три модельных линейки Panasonic NTCONTROL (с авто-детектом по `QID`):
+
+- **DIRECT_RZ** — PT-RZ120, RZ970, RQ22K, RQ32K, RQ50K, RQ13K и старые. Прямые входы
+  (HDMI/DVI/SDI/Digital Link/RGB), тест-паттерн `Convergence` (OTS:11).
+- **SDM_RQ25** — PT-RQ25K, RQ18K, RZ24K, RZ17K + SR-варианты (2022-2023).
+  Все входы кроме HDMI/DisplayPort идут через SDM-слот (`DM1,SD1` и пр.),
+  тест-паттерны `Focus Level 0/50/100%`.
+- **HYBRID_RQ7** — PT-RZ7/RZ6/RQ7/RQ6 (включая PT-RQ7L, PT-RQ7LBEJ).
+  HDMI и Digital Link напрямую, плюс SDM-слот.
+
+UI-комбо «Input Source» и «Test Pattern» автоматически фильтруются под модель —
+не выберешь то, чего на проекторе физически нет.
 
 ## Стек
 
@@ -91,10 +104,41 @@ IP,PORT,USERNAME,PASSWORD,LABEL,X,Y
 ## Тесты
 
 ```bash
-pytest                          # все
-pytest tests/test_osc_server.py # только OSC
+pytest                                      # все 62 теста
+pytest tests/test_osc_server.py             # OSC pub/sub
+pytest tests/test_constants.py              # детектор моделей и фильтры профилей
+pytest tests/test_projector_api.py          # snapshot, identity, set/get команды
+pytest tests/test_projector_client_lock.py  # сериализация per-projector
 ```
 
-## Структура проекта
+## Сборка standalone-приложения (PyInstaller)
 
-См. `CLAUDE.md` — там подробное описание слоёв и архитектуры.
+Один исполняемый файл / `.app` бандл — собирается на каждой целевой OS отдельно
+(кросс-сборку не делаем). Из репо-рут:
+
+```bash
+pip install pyinstaller
+
+# macOS — .app в dist/
+pyinstaller --windowed --name "3PShC" \
+  --collect-submodules dearpygui --collect-submodules oscpy \
+  --hidden-import tkinter \
+  --paths src \
+  src/app.py
+
+# Windows 11 — single .exe в dist\
+pyinstaller --onefile --windowed --name "3PShC" ^
+  --collect-submodules dearpygui --collect-submodules oscpy ^
+  --hidden-import tkinter ^
+  --paths src ^
+  src\app.py
+```
+
+Подробнее — см. [`doc/USAGE.md`](doc/USAGE.md), раздел «Сборка standalone-сборок».
+
+## Документация
+
+- [`doc/USAGE.md`](doc/USAGE.md) — пользовательский гайд: workflow, OSC, профили
+  моделей, troubleshooting, сборка standalone.
+- [`CLAUDE.md`](CLAUDE.md) — архитектура слоёв, runtime model, профили входов.
+- `doc/*.pdf` — оригинальные команды Panasonic (RZ120, RQ25K-серия, RQ7-серия).

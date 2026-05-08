@@ -2,6 +2,7 @@
 Константы протокола Panasonic и параметры приложения.
 Чистый модуль без зависимостей от I/O или UI.
 """
+import re
 
 
 class ProjectorCommands:
@@ -68,9 +69,9 @@ class ProjectorCommands:
 
     # Screen Setting - Aspect Ratio
     QUERY_ASPECT_RATIO = 'QSF'
-    SET_ASPECT_RATIO_16_10 = 'VSP:0'
-    SET_ASPECT_RATIO_16_9 = 'VSP:1'
-    SET_ASPECT_RATIO_4_3 = 'VSP:2'
+    SET_ASPECT_RATIO_16_10 = 'VSF:0'
+    SET_ASPECT_RATIO_16_9 = 'VSF:1'
+    SET_ASPECT_RATIO_4_3 = 'VSF:2'
 
     # Test Pattern
     QUERY_TEST_PATTERN = 'QTS'
@@ -97,6 +98,32 @@ class ProjectorCommands:
     QUERY_INSTALLATION = 'QSP'
     SET_INSTALLATION = 'OIL:{}'
 
+    # Input Select (IIS:*) и query
+    QUERY_INPUT = 'QIN'
+    SET_INPUT = 'IIS:{}'
+
+    # Freeze (стоп-кадр)
+    QUERY_FREEZE = 'QFZ'
+    FREEZE_OFF = 'OFZ:0'
+    FREEZE_ON = 'OFZ:1'
+
+    # On Screen Display
+    QUERY_OSD = 'QOS'
+    OSD_OFF = 'OOS:0'
+    OSD_ON = 'OOS:1'
+
+    # Geometry (VXX:GMMI0): off / keystone / curved / corner correction
+    QUERY_GEOMETRY = 'QVX:GMMI0'
+    SET_GEOMETRY = 'VXX:GMMI0={}'
+
+    # Идентификация — общий callback во всех PDF (RZ120 / RQ25K / RQ7-series).
+    QUERY_MODEL = 'QID'           # → 'RZ120', 'RQ25K', 'SRQ25KC', 'RQ7L', ...
+    QUERY_SERIAL = 'QSN'          # → 'SW0101234'
+    # Firmware: RZ120/RQ25K знают SVRS0; RQ7-series — только SVRSE; RQ25K знает
+    # оба. ProjectorApi.refresh_identity() пробует SVRS0, при ER — SVRSE.
+    QUERY_FIRMWARE_MAIN = 'QVX:SVRS0'      # main firmware на RZ/RQ25K
+    QUERY_FIRMWARE_GENERIC = 'QVX:SVRSE'   # единый ответ на RQ7-series
+
 
 class ProjectorResponses:
     """Ответы проектора"""
@@ -118,7 +145,11 @@ class ProjectorProtocol:
 
     DEFAULT_TIMEOUT = 2
     INITIAL_BUFFER_SIZE = 1024
-    RESPONSE_BUFFER_SIZE = 21
+    # 256 хватает для самых длинных типовых ответов: firmware-строка
+    # 'SVRS0=01.05.00/01.04.01' (~24 байт) + headers, lens-position
+    # 'LNSSB=-02480-03200', сериийник 'SW0101234'. 21-байтовый буфер
+    # обрезал firmware на старых ревизиях прошивки.
+    RESPONSE_BUFFER_SIZE = 256
 
     # Polling-параметры для apply_saved_settings.
     # Заменяет старый open-loop sleep(12) — ждём, пока два последовательных
@@ -136,6 +167,10 @@ class ProjectorStates:
     SHUTTER_TIME_OPTIONS = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5,
                             3.0, 3.5, 4.0, 5.0, 7.0, 10.0]
 
+    # Универсальные паттерны (есть на всех 3 ревизиях PDF) + профиль-специфичные.
+    # 'Convergence' (OTS:11) — есть только на RZ120; на RQ25K/RQ7 проектор
+    # ответит ER401. 'Focus Level *' (OTS:32/33/34) — есть только на RQ25K и
+    # RQ7-series. Фильтрация — через test_patterns_for_model().
     TEST_PATTERNS = {
         'Off': '00',
         'White': '01',
@@ -154,7 +189,12 @@ class ProjectorStates:
         'Focus Magenta': '74',
         'Focus Yellow': '75',
         'Focus': '78',
+        'Focus Level 0%': '32',
+        'Focus Level 50%': '33',
+        'Focus Level 100%': '34',
     }
+    _TEST_PATTERN_RZ_ONLY = {'Convergence'}
+    _TEST_PATTERN_MODERN_ONLY = {'Focus Level 0%', 'Focus Level 50%', 'Focus Level 100%'}
 
     INSTALLATION_MODES = {
         'Front/Desk': '0',
@@ -167,8 +207,148 @@ class ProjectorStates:
 
     ASPECT_RATIO_BY_CODE = {'0': '16:10', '1': '16:9', '2': '4:3'}
 
+    # Источники сигнала. Имена в комбо UI → сабкод протокола (после IIS:).
+    # Реальная развилка проходит не по серии (RZ vs RQ), а по «стилю входов»:
+    #   - DIRECT: классические входы напрямую (PT-RZ120, PT-RZ970, PT-RQ7L,
+    #     PT-RQ22K, PT-RQ32K, PT-RQ50K и др.) — IIS:HD1, IIS:SD1, IIS:DL1.
+    #   - SDM:    SDM-слот, появился в линейке 2022-2023 (PT-RQ25K/RQ18K/RZ24K
+    #     /RZ17K и SRQ/SRZ-варианты) — IIS:DM1,SD1 / DM1,DL1 / DM1,WP1 / TP1.
+    # Если выбрать «не свой» вход, проектор ответит ER401, в логе будет видно.
+    INPUT_SOURCES = {
+        # Universal — есть и в DIRECT, и в SDM
+        'HDMI1': 'HD1',
+        'HDMI2': 'HD2',
+        'DisplayPort': 'DP1',
+        # DIRECT-style (RZ120, RZ970, RQ7L, RQ22K, RQ32K, RQ50K, …)
+        'SDI1 (direct)': 'SD1',
+        'Digital Link (direct)': 'DL1',
+        'DVI-D (direct)': 'DVI',
+        'COMPUTER1/RGB1 (direct)': 'RG1',
+        'COMPUTER2/RGB2 (direct)': 'RG2',
+        # SDM SLOT (RQ25K/RQ18K/RZ24K/RZ17K и SR*-варианты)
+        'SLOT: 12G SDI (SDM)': 'DM1,SD1',
+        'SLOT: Digital Link (SDM)': 'DM1,DL1',
+        'SLOT: PressIT (SDM)': 'DM1,WP1',
+        'SLOT: 3rd Party (SDM)': 'DM1,TP1',
+    }
+    INPUT_SOURCE_BY_CODE = {code: name for name, code in INPUT_SOURCES.items()}
 
-class OSCMessages:
-    """Типы OSC сообщений"""
+    # Geometry mode для VXX:GMMI0 (только наиболее ходовые в полевой работе).
+    GEOMETRY_MODES = {
+        'Off': '+00000',
+        'Keystone': '+00001',
+        'Curved': '+00002',
+        'Corner Correction': '+00010',
+    }
+    GEOMETRY_BY_CODE = {code: name for name, code in GEOMETRY_MODES.items()}
 
-    MESSAGE_TYPE_BUTTON = 3
+    # Семьи моделей — для отображения в Info-табе. Не используется для
+    # фильтрации входов (см. INPUT_PROFILE_* ниже): для входов важна не серия,
+    # а модельный ряд (RZ24K с SDM ≠ RZ120 без SDM).
+    FAMILY_RZ = 'RZ'
+    FAMILY_RQ = 'RQ'
+    FAMILY_UNKNOWN = 'unknown'
+
+    @classmethod
+    def detect_family(cls, model: str) -> str:
+        """'RZ' / 'RQ' / 'unknown' — высокоуровневая метка для UI."""
+        if not model:
+            return cls.FAMILY_UNKNOWN
+        m = model.upper()
+        if 'RQ' in m:
+            return cls.FAMILY_RQ
+        if 'RZ' in m:
+            return cls.FAMILY_RZ
+        return cls.FAMILY_UNKNOWN
+
+    # ---- Input profiles ----
+    # Реальный набор входов зависит не от RZ/RQ, а от поколения железа:
+    #
+    #   DIRECT_RZ — классические прямые входы. Семейства:
+    #       PT-RZ120, PT-RZ970, PT-RQ22K, PT-RQ32K, PT-RQ50K, PT-RQ13K и др.
+    #       Имеют HDMI direct, SDI direct, DL direct, DVI, RGB1/RGB2.
+    #
+    #   SDM_RQ25 — все входы только через SDM-слот. Серия 2022-2023:
+    #       PT-RQ25K, PT-RQ18K, PT-RZ24K, PT-RZ17K и SR-варианты.
+    #       PDF: rq25k_series_command_en_cn_ja.pdf
+    #
+    #   HYBRID_RQ7 — гибрид: HDMI и Digital Link напрямую + SDM-слот.
+    #       PT-RZ7/RZ6/RQ7/RQ6 (включая суффиксы L/LBEJ и т.п.).
+    #       PDF: PT-RQ7_series_command_en_cn_ja.pdf
+    #
+    #   UNKNOWN — неизвестная модель: показываем весь список.
+    PROFILE_DIRECT_RZ = 'DIRECT_RZ'
+    PROFILE_SDM_RQ25 = 'SDM_RQ25'
+    PROFILE_HYBRID_RQ7 = 'HYBRID_RQ7'
+    PROFILE_UNKNOWN = 'UNKNOWN'
+
+    INPUT_PROFILES = {
+        PROFILE_DIRECT_RZ: [
+            'HDMI1', 'HDMI2',
+            'SDI1 (direct)', 'Digital Link (direct)',
+            'DVI-D (direct)',
+            'COMPUTER1/RGB1 (direct)', 'COMPUTER2/RGB2 (direct)',
+        ],
+        PROFILE_SDM_RQ25: [
+            'HDMI1', 'HDMI2', 'DisplayPort',
+            'SLOT: 12G SDI (SDM)', 'SLOT: Digital Link (SDM)',
+            'SLOT: PressIT (SDM)', 'SLOT: 3rd Party (SDM)',
+        ],
+        PROFILE_HYBRID_RQ7: [
+            'HDMI1', 'HDMI2',
+            'Digital Link (direct)',
+            'SLOT: 12G SDI (SDM)', 'SLOT: Digital Link (SDM)',
+            'SLOT: PressIT (SDM)', 'SLOT: 3rd Party (SDM)',
+        ],
+        # PROFILE_UNKNOWN заполняется в input_sources_for_model — все ключи.
+    }
+
+    # Порядок важен: сначала самые специфичные (с явными цифрами модельного ряда).
+    _PROFILE_PATTERNS = [
+        (PROFILE_SDM_RQ25, re.compile(r'(?<![0-9])(?:RQ25|RQ18|RZ24|RZ17)(?![0-9])', re.I)),
+        (PROFILE_HYBRID_RQ7, re.compile(r'(?<![0-9])(?:R[QZ][67])(?![0-9])', re.I)),
+        (PROFILE_DIRECT_RZ, re.compile(r'R[QZ]\d+', re.I)),
+    ]
+
+    @classmethod
+    def detect_input_profile(cls, model: str) -> str:
+        """Определить профиль входов по строке от QID.
+        Принимает 'RZ120', 'RQ25K', 'SRQ25KC', 'RQ7L', 'RQ7LBEJ', etc.
+        """
+        if not model:
+            return cls.PROFILE_UNKNOWN
+        for profile, regex in cls._PROFILE_PATTERNS:
+            if regex.search(model):
+                return profile
+        return cls.PROFILE_UNKNOWN
+
+    @classmethod
+    def input_sources_for_model(cls, model: str) -> dict:
+        """Вернуть словарь {имя: код} для модели. Неизвестная модель → все входы."""
+        profile = cls.detect_input_profile(model)
+        if profile == cls.PROFILE_UNKNOWN:
+            return dict(cls.INPUT_SOURCES)
+        names = cls.INPUT_PROFILES[profile]
+        return {n: cls.INPUT_SOURCES[n] for n in names if n in cls.INPUT_SOURCES}
+
+    @classmethod
+    def test_patterns_for_model(cls, model: str) -> dict:
+        """Test-паттерны под профиль модели:
+          - DIRECT_RZ (RZ120 и т.п.): есть Convergence (OTS:11), нет Focus Level.
+          - SDM_RQ25 (RQ25K/RZ24K-серия): нет Convergence, есть Focus Level 0/50/100%
+            (OTS:32/33/34) — подтверждено по rq25k_series_command_en_cn_ja.pdf.
+          - HYBRID_RQ7 (RZ7/RZ6/RQ7/RQ6): нет ни Convergence, ни Focus Level —
+            у RQ7-серии другой набор (OTS:87 Circle, OTS:A1..A4 User), которые
+            мы пока не выводим в комбо.
+          - UNKNOWN: показываем весь набор.
+        """
+        profile = cls.detect_input_profile(model)
+        if profile == cls.PROFILE_UNKNOWN:
+            return dict(cls.TEST_PATTERNS)
+        if profile == cls.PROFILE_DIRECT_RZ:
+            excluded = cls._TEST_PATTERN_MODERN_ONLY
+        elif profile == cls.PROFILE_SDM_RQ25:
+            excluded = cls._TEST_PATTERN_RZ_ONLY
+        else:  # HYBRID_RQ7 — исключаем оба набора
+            excluded = cls._TEST_PATTERN_RZ_ONLY | cls._TEST_PATTERN_MODERN_ONLY
+        return {n: c for n, c in cls.TEST_PATTERNS.items() if n not in excluded}

@@ -1,24 +1,24 @@
 """
 Репозиторий per-projector настроек: сохранение/загрузка JSON-файла на проектор.
-Файлы лежат в src/data/settings/projector_<ip>.json и используются для быстрого
-восстановления позиции линзы и настроек дисплея.
+Файлы лежат в Paths.SETTINGS_DIR (env PSHC_SETTINGS_DIR), по одному на IP:
+projector_<ip_with_underscores>.json. Используются для быстрого восстановления
+позиции линзы и настроек дисплея.
 """
 import json
 import os
 from typing import Any, Dict, Optional
 
+from config import Paths
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-_SETTINGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'settings')
-
 
 def get_settings_file_path(projector_ip: str) -> str:
     """Путь к JSON-файлу настроек по IP. Создаёт директорию при необходимости."""
-    os.makedirs(_SETTINGS_DIR, exist_ok=True)
+    os.makedirs(Paths.SETTINGS_DIR, exist_ok=True)
     safe_ip = projector_ip.replace('.', '_')
-    return os.path.join(_SETTINGS_DIR, f"projector_{safe_ip}.json")
+    return os.path.join(Paths.SETTINGS_DIR, f"projector_{safe_ip}.json")
 
 
 def create_projector_settings_dict(

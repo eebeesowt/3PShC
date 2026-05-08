@@ -1,7 +1,10 @@
 """
-DearPyGui-виджеты для управления объективом: крест Shift, бары Focus и Zoom.
-Каждая кнопка вызывает callback(direction, speed) — direction 'plus'/'minus',
-speed 'slow'/'normal'/'fast'.
+DearPyGui-виджеты для управления объективом. Скорость выбирается один раз
+радио-переключателем; стрелки читают её через speed_provider() при клике —
+так число кнопок сократилось с 21 до 9.
+
+API колбэков сохраняем тот же (callback(speed)) — ProjectorApi ждёт
+'slow'/'normal'/'fast'. direction ('plus'/'minus') зашит в имя callback.
 """
 from typing import Callable
 
@@ -17,67 +20,61 @@ class LensSpeed:
 
 
 SpeedCallback = Callable[[str], None]
+SpeedProvider = Callable[[], str]
 
 
-def build_shift_cross(
+def build_speed_selector(parent: int, default: str = LensSpeed.NORMAL) -> int:
+    """Сегмент выбора скорости (slow/normal/fast). Возвращает tag —
+    settings_dialog читает его через dpg.get_value() и передаёт в callbacks.
+    """
+    tag = dpg.generate_uuid()
+    with dpg.group(parent=parent, horizontal=True):
+        dpg.add_text("Speed:")
+        dpg.add_radio_button(
+            items=[LensSpeed.SLOW, LensSpeed.NORMAL, LensSpeed.FAST],
+            default_value=default,
+            horizontal=True,
+            tag=tag,
+        )
+    return tag
+
+
+def build_shift_pad(
     parent: int,
     on_h_plus: SpeedCallback,
     on_h_minus: SpeedCallback,
     on_v_plus: SpeedCallback,
     on_v_minus: SpeedCallback,
     on_home: Callable[[], None],
+    speed_provider: SpeedProvider,
 ) -> None:
-    """Крест 5×5 с центральной кнопкой Home. Рисуется внутри parent."""
+    """Крест 3×3: пусто/↑/пусто, ←/Home/→, пусто/↓/пусто."""
     dpg.add_text("SHIFT", parent=parent)
-
     with dpg.table(parent=parent, header_row=False, no_pad_innerX=True,
-                   no_pad_outerX=True, policy=dpg.mvTable_SizingFixedFit) as table:
+                   no_pad_outerX=True, policy=dpg.mvTable_SizingFixedFit):
         for _ in range(3):
             dpg.add_table_column()
 
-        # Row 1: empty | up-fast | empty
         with dpg.table_row():
-            dpg.add_spacer(width=55)
-            with dpg.group():
-                _btn(parent=None, label="▲▲", w=55, h=28, kind='info',
-                     callback=lambda: on_v_plus(LensSpeed.FAST))
-                _btn(parent=None, label="▲", w=55, h=28, kind='info',
-                     callback=lambda: on_v_plus(LensSpeed.NORMAL))
-                _btn(parent=None, label="△", w=55, h=22, kind='info',
-                     callback=lambda: on_v_plus(LensSpeed.SLOW))
-            dpg.add_spacer(width=55)
+            dpg.add_spacer(width=52)
+            _btn(label="↑", w=52, h=40, kind='info',
+                 callback=lambda: on_v_plus(speed_provider()))
+            dpg.add_spacer(width=52)
 
-        # Row 2: H minus row | Home | H plus row
         with dpg.table_row():
-            with dpg.group(horizontal=True):
-                _btn(parent=None, label="◀◀", w=40, h=55, kind='info',
-                     callback=lambda: on_h_minus(LensSpeed.FAST))
-                _btn(parent=None, label="◀", w=40, h=55, kind='info',
-                     callback=lambda: on_h_minus(LensSpeed.NORMAL))
-                _btn(parent=None, label="◁", w=30, h=55, kind='info',
-                     callback=lambda: on_h_minus(LensSpeed.SLOW))
-            home_btn = dpg.add_button(label="Home", width=55, height=55,
+            _btn(label="←", w=52, h=40, kind='info',
+                 callback=lambda: on_h_minus(speed_provider()))
+            home_btn = dpg.add_button(label="Home", width=52, height=40,
                                       callback=lambda: on_home())
             dpg.bind_item_theme(home_btn, ButtonThemes.get('primary'))
-            with dpg.group(horizontal=True):
-                _btn(parent=None, label="▷", w=30, h=55, kind='info',
-                     callback=lambda: on_h_plus(LensSpeed.SLOW))
-                _btn(parent=None, label="▶", w=40, h=55, kind='info',
-                     callback=lambda: on_h_plus(LensSpeed.NORMAL))
-                _btn(parent=None, label="▶▶", w=40, h=55, kind='info',
-                     callback=lambda: on_h_plus(LensSpeed.FAST))
+            _btn(label="→", w=52, h=40, kind='info',
+                 callback=lambda: on_h_plus(speed_provider()))
 
-        # Row 3: empty | down stack | empty
         with dpg.table_row():
-            dpg.add_spacer(width=55)
-            with dpg.group():
-                _btn(parent=None, label="▽", w=55, h=22, kind='info',
-                     callback=lambda: on_v_minus(LensSpeed.SLOW))
-                _btn(parent=None, label="▼", w=55, h=28, kind='info',
-                     callback=lambda: on_v_minus(LensSpeed.NORMAL))
-                _btn(parent=None, label="▼▼", w=55, h=28, kind='info',
-                     callback=lambda: on_v_minus(LensSpeed.FAST))
-            dpg.add_spacer(width=55)
+            dpg.add_spacer(width=52)
+            _btn(label="↓", w=52, h=40, kind='info',
+                 callback=lambda: on_v_minus(speed_provider()))
+            dpg.add_spacer(width=52)
 
 
 def build_directional_bar(
@@ -87,33 +84,21 @@ def build_directional_bar(
     right_label: str,
     on_minus: SpeedCallback,
     on_plus: SpeedCallback,
+    speed_provider: SpeedProvider,
 ) -> None:
-    """Линейный ряд из 6 кнопок (fast/normal/slow | slow/normal/fast)."""
-    dpg.add_text(title, parent=parent)
+    """Линейка: title | left_label [-] [+] right_label."""
     with dpg.group(parent=parent, horizontal=True):
+        dpg.add_text(f"{title}:")
+        dpg.add_spacer(width=8)
         dpg.add_text(left_label)
-        _btn(parent=None, label="◀◀", w=42, h=28, kind='success',
-             callback=lambda: on_minus(LensSpeed.FAST))
-        _btn(parent=None, label="◀", w=42, h=28, kind='success',
-             callback=lambda: on_minus(LensSpeed.NORMAL))
-        _btn(parent=None, label="◁", w=32, h=28, kind='success',
-             callback=lambda: on_minus(LensSpeed.SLOW))
-        dpg.add_spacer(width=14)
-        _btn(parent=None, label="▷", w=32, h=28, kind='success',
-             callback=lambda: on_plus(LensSpeed.SLOW))
-        _btn(parent=None, label="▶", w=42, h=28, kind='success',
-             callback=lambda: on_plus(LensSpeed.NORMAL))
-        _btn(parent=None, label="▶▶", w=42, h=28, kind='success',
-             callback=lambda: on_plus(LensSpeed.FAST))
+        _btn(label="-", w=42, h=28, kind='success',
+             callback=lambda: on_minus(speed_provider()))
+        _btn(label="+", w=42, h=28, kind='success',
+             callback=lambda: on_plus(speed_provider()))
         dpg.add_text(right_label)
 
 
-def _btn(parent, label: str, w: int, h: int, kind: str, callback: Callable) -> int:
-    """Создать кнопку с темой. parent=None — текущий контейнер DPG."""
-    if parent is None:
-        btn = dpg.add_button(label=label, width=w, height=h, callback=callback)
-    else:
-        btn = dpg.add_button(label=label, width=w, height=h,
-                             callback=callback, parent=parent)
+def _btn(label: str, w: int, h: int, kind: str, callback: Callable) -> int:
+    btn = dpg.add_button(label=label, width=w, height=h, callback=callback)
     dpg.bind_item_theme(btn, ButtonThemes.get(kind))
     return btn

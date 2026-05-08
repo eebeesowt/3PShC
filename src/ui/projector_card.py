@@ -15,8 +15,8 @@ from utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 
-CARD_WIDTH = 280
-CARD_HEIGHT = 165
+CARD_WIDTH = 270
+CARD_HEIGHT = 150
 
 
 class ProjectorCard:
@@ -61,7 +61,8 @@ class ProjectorCard:
             no_resize=True,
             on_close=self._handle_window_close,
         ):
-            # Верхняя строка: индикатор питания + статус шаттера + ⚙
+            # Верхняя строка: ● статус | Settings | Group
+            # Удаление — крестиком в заголовке окна (on_close).
             with dpg.group(horizontal=True):
                 dpg.add_text("●", tag=self._power_dot_tag, color=self._power_color())
                 dpg.add_text(
@@ -69,35 +70,35 @@ class ProjectorCard:
                     tag=self._status_tag,
                     color=self._status_color(),
                 )
-                dpg.add_spacer(width=20)
-                btn = dpg.add_button(label="Settings", callback=self._handle_settings)
+                dpg.add_spacer(width=6)
+                btn = dpg.add_button(label="Settings", callback=self._handle_settings,
+                                     width=70, height=22)
                 dpg.bind_item_theme(btn, ButtonThemes.get('info'))
+                dpg.add_checkbox(label="Group", tag=self._group_checkbox_tag)
 
             dpg.add_separator()
 
-            # Кнопки шаттера
             with dpg.group(horizontal=True):
                 open_btn = dpg.add_button(
                     label="Open",
-                    width=120, height=34,
+                    width=100, height=30,
                     callback=lambda: self._on_shutter(self, True),
                 )
                 dpg.bind_item_theme(open_btn, ButtonThemes.get('primary'))
                 close_btn = dpg.add_button(
                     label="Close",
-                    width=120, height=34,
+                    width=100, height=30,
                     callback=lambda: self._on_shutter(self, False),
                 )
                 dpg.bind_item_theme(close_btn, ButtonThemes.get('danger'))
 
-            # Время вкл/выкл шаттера
             shutter_options = [str(v) for v in ProjectorStates.SHUTTER_TIME_OPTIONS]
             with dpg.group(horizontal=True):
                 dpg.add_text("In:")
                 dpg.add_combo(
                     items=shutter_options,
                     default_value=str(self.projector.shutter_in_time or shutter_options[0]),
-                    width=70,
+                    width=60,
                     tag=self._shutter_in_tag,
                     callback=lambda s, v: self._on_set_in(self, v),
                 )
@@ -105,31 +106,18 @@ class ProjectorCard:
                 dpg.add_combo(
                     items=shutter_options,
                     default_value=str(self.projector.shutter_out_time or shutter_options[0]),
-                    width=70,
+                    width=60,
                     tag=self._shutter_out_tag,
                     callback=lambda s, v: self._on_set_out(self, v),
                 )
-
-            with dpg.group(horizontal=True):
-                dpg.add_checkbox(label="Group", tag=self._group_checkbox_tag)
-                dpg.add_spacer(width=80)
-                rm_btn = dpg.add_button(
-                    label="Remove",
-                    callback=self._handle_remove,
-                )
-                dpg.bind_item_theme(rm_btn, ButtonThemes.get('danger_dark'))
 
     # ---- Колбэки DPG ----
 
     def _handle_settings(self) -> None:
         self._on_open_settings(self)
 
-    def _handle_remove(self) -> None:
-        self.destroy()
-        self._on_remove(self)
-
     def _handle_window_close(self) -> None:
-        # Кнопка × в заголовке окна — тот же путь что и Remove
+        self.destroy()
         self._on_remove(self)
 
     # ---- Индикаторы ----

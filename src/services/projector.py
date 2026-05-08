@@ -1,26 +1,17 @@
 """
-Тонкий фасад Projector — сохраняет публичный API для существующих UI и сервисов.
-Делегирует транспорт в ProjectorClient, команды в ProjectorApi, состояние
-хранит в ProjectorState. Эта прослойка существует на время рефакторинга;
-прямые потребители постепенно переходят на core/infra напрямую.
+Тонкий фасад Projector — единый mutable-handle, которым оперируют UI и
+сервисы. Делегирует транспорт в ProjectorClient, команды в ProjectorApi,
+состояние хранит в ProjectorState.
 """
 from typing import Optional, Tuple
 
-from core.constants import ProjectorProtocol, ProjectorStates
+from core.constants import ProjectorStates
 from core.models import ProjectorConfig, ProjectorState
 from infra.projector_api import ProjectorApi
 from infra.projector_client import ProjectorClient
-from utils.logger import setup_logger
-
-logger = setup_logger(__name__)
 
 
 class Projector:
-    # Константы на уровне класса — оставлены для обратной совместимости
-    SHUTTER_OPEN = ProjectorStates.SHUTTER_OPEN
-    SHUTER_CLOSED = ProjectorStates.SHUTTER_CLOSED  # legacy typo
-    SHUTTER_CLOSED = ProjectorStates.SHUTTER_CLOSED
-
     def __init__(self, ip, port, login, password, label, id) -> None:
         self._config = ProjectorConfig(
             ip=ip,
@@ -31,10 +22,9 @@ class Projector:
         )
         self._state = ProjectorState()
         self._client = ProjectorClient(self._config)
-        self._api = ProjectorApi(self._client, self._state)
+        self._api = ProjectorApi(self._config, self._client, self._state)
 
         self.id = id
-        self.shutter_time_dict = ProjectorStates.SHUTTER_TIME_OPTIONS
 
     # ----- Конфиг (read-only) -----
 
@@ -108,6 +98,31 @@ class Projector:
     def state(self) -> ProjectorState:
         return self._state
 
+    # ----- Идентификация -----
+
+    @property
+    def model(self) -> Optional[str]:
+        return self._state.model
+
+    @property
+    def serial(self) -> Optional[str]:
+        return self._state.serial
+
+    @property
+    def firmware(self) -> Optional[str]:
+        return self._state.firmware
+
+    @property
+    def family(self) -> str:
+        """'RZ' / 'RQ' / 'unknown' — выводится из state.model."""
+        return ProjectorStates.detect_family(self._state.model or '')
+
+    @property
+    def input_profile(self) -> str:
+        """'DIRECT_RZ' / 'SDM_RQ25' / 'HYBRID_RQ7' / 'UNKNOWN' — определяет
+        список физически доступных входов на этой модели."""
+        return ProjectorStates.detect_input_profile(self._state.model or '')
+
     @property
     def config(self) -> ProjectorConfig:
         return self._config
@@ -116,15 +131,16 @@ class Projector:
     def api(self) -> ProjectorApi:
         return self._api
 
-    # ----- Транспорт (legacy API) -----
-
-    async def send_cmd(self, cmd: str, timeout: float = ProjectorProtocol.DEFAULT_TIMEOUT) -> str:
-        return await self._client.send_raw(cmd, timeout=timeout)
-
     # ----- Высокоуровневые команды (делегация в ProjectorApi) -----
 
     async def get_info(self) -> None:
         await self._api.refresh_info()
+
+    async def refresh_identity(self) -> None:
+        """Принудительно обновить model/serial/firmware. Обычно делается лениво
+        в refresh_info при первом успехе; вызывайте напрямую, чтобы перезапросить.
+        """
+        await self._api.refresh_identity()
 
     async def power_on(self) -> None:
         await self._api.power_on()
@@ -190,18 +206,28 @@ class Projector:
     async def apply_saved_settings(self, settings: dict) -> None:
         await self._api.apply_saved_settings(settings)
 
-    def debug_info(self) -> None:
-        info = f"""
-    IP--------{self.ip}
-    PORT------{self.port}
-    LOGIN-----{self.login}
-    PASSWORD--{self.password}
-    LABEL-----{self.label}
-    ID--------{self.id}
-    POWER-----{self.power}
-    GROUP-----{self.group}
-    SHUTTER---{self.shutter}
-    SHUTTER_IN---{self.shutter_in_time}
-    SHUTTER_OUT---{self.shutter_out_time}
-        """
-        logger.debug(info)
+    # ----- Source / Freeze / OSD / Geometry -----
+
+    async def get_input_source(self) -> str:
+        return await self._api.get_input_source()
+
+    async def set_input_source(self, name: str) -> None:
+        await self._api.set_input_source(name)
+
+    async def get_freeze(self) -> Optional[bool]:
+        return await self._api.get_freeze()
+
+    async def set_freeze(self, frozen: bool) -> None:
+        await self._api.set_freeze(frozen)
+
+    async def get_osd(self) -> Optional[bool]:
+        return await self._api.get_osd()
+
+    async def set_osd(self, on: bool) -> None:
+        await self._api.set_osd(on)
+
+    async def get_geometry(self) -> str:
+        return await self._api.get_geometry()
+
+    async def set_geometry(self, mode_name: str) -> None:
+        await self._api.set_geometry(mode_name)
