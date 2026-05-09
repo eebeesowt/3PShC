@@ -116,6 +116,15 @@ class ProjectorCommands:
     QUERY_GEOMETRY = 'QVX:GMMI0'
     SET_GEOMETRY = 'VXX:GMMI0={}'
 
+    # Corner correction — set/query шаблоны для VXX:GMFI{1..A}.
+    # Конкретные регистры — в ProjectorStates.CORNER_REGISTERS.
+    SET_CORNER = 'VXX:{reg}={val}'
+    QUERY_CORNER = 'QVX:{reg}'
+    # Calibration test grid поверх изображения (VXX:GMCIA=+00000/+00001).
+    QUERY_CORNER_TESTGRID = 'QVX:GMCIA'
+    CORNER_TESTGRID_OFF = 'VXX:GMCIA=+00000'
+    CORNER_TESTGRID_ON = 'VXX:GMCIA=+00001'
+
     # Идентификация — общий callback во всех PDF (RZ120 / RQ25K / RQ7-series).
     QUERY_MODEL = 'QID'           # → 'RZ120', 'RQ25K', 'SRQ25KC', 'RQ7L', ...
     QUERY_SERIAL = 'QSN'          # → 'SW0101234'
@@ -241,6 +250,25 @@ class ProjectorStates:
         'Corner Correction': '+00010',
     }
     GEOMETRY_BY_CODE = {code: name for name, code in GEOMETRY_MODES.items()}
+
+    # Corner correction registers (VXX:GMFI{1..A}). Sign convention: «+» во ВСЕХ
+    # регистрах двигает соответствующий угол ВНИЗ (для V) или ВПРАВО (для H);
+    # «-» — наоборот. Поэтому UI-кнопки ↑/↓/←/→ дают -/+ независимо от угла.
+    # Допустимые диапазоны различаются по моделям (RZ120 ±300, RQ7 до ±960
+    # на H), поэтому клиппинг — на стороне проектора (он ответит ER при
+    # выходе за диапазон).
+    CORNER_REGISTERS = {
+        'UL_V': 'GMFI1',  # Upper Left vertical
+        'UR_V': 'GMFI2',  # Upper Right vertical
+        'LL_V': 'GMFI3',  # Lower Left vertical
+        'LR_V': 'GMFI4',  # Lower Right vertical
+        'LIN_V': 'GMFI5', # Linearity vertical
+        'UL_H': 'GMFI6',  # Upper Left horizontal
+        'UR_H': 'GMFI7',  # Upper Right horizontal
+        'LL_H': 'GMFI8',  # Lower Left horizontal
+        'LR_H': 'GMFI9',  # Lower Right horizontal
+        'LIN_H': 'GMFIA', # Linearity horizontal
+    }
 
     # Семьи моделей — для отображения в Info-табе. Не используется для
     # фильтрации входов (см. INPUT_PROFILE_* ниже): для входов важна не серия,

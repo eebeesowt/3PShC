@@ -2,7 +2,7 @@
 Модели данных приложения. Чистые dataclass'ы без I/O и UI.
 """
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,10 @@ class ProjectorState:
     group: bool = False
     lens_position: LensPosition = field(default_factory=LensPosition)
     display_settings: DisplaySettings = field(default_factory=DisplaySettings)
+    # Corner correction offsets — {corner_id: int}, например {'UL_V': 50}.
+    # Заполняется через get_corner_offset / set_corner_offset; пустой dict
+    # значит «никаких corner offsets не известно/не применено».
+    corners: Dict[str, int] = field(default_factory=dict)
     # Идентификация (заполняется однократно при первом успешном refresh_info).
     model: Optional[str] = None
     serial: Optional[str] = None

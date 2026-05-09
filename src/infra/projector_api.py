@@ -367,6 +367,59 @@ class ProjectorApi:
         code = ProjectorStates.GEOMETRY_MODES[mode_name]
         await self._client.send_raw(ProjectorCommands.SET_GEOMETRY.format(code))
 
+    # --- Corner correction (VXX:GMFI{1..A}) ---
+
+    async def set_corner_offset(self, corner_id: str, value: int) -> None:
+        """Выставить абсолютное смещение угла. corner_id — ключ из
+        ProjectorStates.CORNER_REGISTERS (например 'UL_V', 'LIN_H').
+        Допустимые диапазоны зависят от модели; за пределами проектор
+        ответит ER401 (логируется через send_raw).
+        """
+        if corner_id not in ProjectorStates.CORNER_REGISTERS:
+            raise ValueError(f"Invalid corner_id: {corner_id}")
+        reg = ProjectorStates.CORNER_REGISTERS[corner_id]
+        cmd = ProjectorCommands.SET_CORNER.format(reg=reg, val=f"{value:+06d}")
+        await self._client.send_raw(cmd)
+        self._state.corners[corner_id] = value
+
+    async def get_corner_offset(self, corner_id: str) -> Optional[int]:
+        """Прочитать текущее смещение угла. Возвращает int или None при ER."""
+        if corner_id not in ProjectorStates.CORNER_REGISTERS:
+            raise ValueError(f"Invalid corner_id: {corner_id}")
+        reg = ProjectorStates.CORNER_REGISTERS[corner_id]
+        result = await self._client.send_raw(
+            ProjectorCommands.QUERY_CORNER.format(reg=reg)
+        )
+        result = result.strip()
+        if not self._is_valid_response(result):
+            return None
+        # 'GMFI1=+00050' → '+00050' → 50
+        val_str = result.split('=')[-1] if '=' in result else result
+        try:
+            value = int(val_str)
+        except ValueError:
+            logger.warning(f"Unexpected corner response for {corner_id}: {result!r}")
+            return None
+        self._state.corners[corner_id] = value
+        return value
+
+    async def get_all_corners(self) -> dict:
+        """Прочитать все 10 corner-регистров в state.corners. Возвращает
+        dict только успешно прочитанных значений.
+        """
+        snapshot = {}
+        for corner_id in ProjectorStates.CORNER_REGISTERS:
+            value = await self.get_corner_offset(corner_id)
+            if value is not None:
+                snapshot[corner_id] = value
+        return snapshot
+
+    async def set_corner_test_grid(self, on: bool) -> None:
+        """Overlay тестовой сетки для калибровки (VXX:GMCIA)."""
+        cmd = (ProjectorCommands.CORNER_TESTGRID_ON if on
+               else ProjectorCommands.CORNER_TESTGRID_OFF)
+        await self._client.send_raw(cmd)
+
     # --- Высокоуровневые сценарии ---
 
     async def apply_saved_settings(self, settings: dict) -> None:
@@ -405,6 +458,28 @@ class ProjectorApi:
                 v_int = int(v_position)
                 await self.set_lens_position(h_value=h_int, v_value=v_int)
 
+            geometry_corners = settings.get('geometry_corners') or {}
+            if geometry_corners:
+                # Активируем режим Corner Correction явно — иначе offsets уйдут в
+                # пустоту, если на проекторе сейчас Off/Keystone/Curved.
+                logger.info(
+                    f"Applying {len(geometry_corners)} corner offsets for {self.label}"
+                )
+                try:
+                    await self.set_geometry('Corner Correction')
+                except Exception as exc:
+                    logger.warning(f"Could not switch to Corner Correction: {exc}")
+                for cid, raw_val in geometry_corners.items():
+                    if cid not in ProjectorStates.CORNER_REGISTERS:
+                        logger.warning(f"Unknown corner_id in saved scene: {cid}")
+                        continue
+                    try:
+                        await self.set_corner_offset(cid, int(raw_val))
+                    except Exception as exc:
+                        logger.warning(
+                            f"Failed to set corner {cid}={raw_val}: {exc}"
+                        )
+
             logger.info(f"Successfully applied saved settings for {self.label}")
         except Exception as exc:
             logger.error(f"Error applying saved settings for {self.label}: {exc}")
@@ -430,7 +505,7 @@ class ProjectorApi:
                     installation_mode = name
                     break
 
-        return {
+        result = {
             'lens_settings': {
                 # '---' — sentinel: apply_saved_settings пропустит шаг и не уведёт
                 # линзу в (0,0), если опрос не удался.
@@ -442,3 +517,12 @@ class ProjectorApi:
                 'installation_mode': installation_mode,
             },
         }
+        # Corner correction — пишем секцию ТОЛЬКО если есть ненулевые offsets.
+        # Это держит сцены без CC компактными и не активирует случайно режим
+        # Corner Correction при загрузке.
+        non_zero_corners = {
+            cid: val for cid, val in self._state.corners.items() if val != 0
+        }
+        if non_zero_corners:
+            result['geometry_corners'] = non_zero_corners
+        return result

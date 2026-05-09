@@ -133,3 +133,135 @@ def test_get_freeze_parses_bare_zero_one():
 def test_get_osd_parses_bare_zero_one():
     api, _, _ = _make_api({ProjectorCommands.QUERY_OSD: '0'})
     assert asyncio.run(api.get_osd()) is False
+
+
+# ---- Corner correction ----
+
+
+def test_set_corner_offset_serializes_register_and_value():
+    api, _, client = _make_api({})
+    asyncio.run(api.set_corner_offset('UL_V', 250))
+    assert client.calls == ['VXX:GMFI1=+00250']
+
+
+def test_set_corner_offset_negative_value():
+    api, _, client = _make_api({})
+    asyncio.run(api.set_corner_offset('LL_V', -150))
+    assert client.calls == ['VXX:GMFI3=-00150']
+
+
+def test_set_corner_offset_caches_in_state():
+    api, state, _ = _make_api({})
+    asyncio.run(api.set_corner_offset('UL_H', 480))
+    assert state.corners['UL_H'] == 480
+
+
+def test_set_corner_offset_rejects_bad_id():
+    api, _, _ = _make_api({})
+    import pytest
+    with pytest.raises(ValueError):
+        asyncio.run(api.set_corner_offset('BOGUS', 0))
+
+
+def test_get_corner_offset_parses_response():
+    api, state, _ = _make_api({'QVX:GMFI2': 'GMFI2=+00075'})
+    value = asyncio.run(api.get_corner_offset('UR_V'))
+    assert value == 75
+    assert state.corners['UR_V'] == 75
+
+
+def test_get_corner_offset_handles_negative():
+    api, _, _ = _make_api({'QVX:GMFI7': 'GMFI7=-00200'})
+    assert asyncio.run(api.get_corner_offset('UR_H')) == -200
+
+
+def test_get_corner_offset_returns_none_on_er():
+    api, _, _ = _make_api({'QVX:GMFI1': 'ER401'})
+    assert asyncio.run(api.get_corner_offset('UL_V')) is None
+
+
+def test_get_all_corners_iterates_all_registers():
+    responses = {
+        f'QVX:{reg}': f'{reg}={"+00010"}'
+        for reg in ('GMFI1', 'GMFI2', 'GMFI3', 'GMFI4', 'GMFI5',
+                    'GMFI6', 'GMFI7', 'GMFI8', 'GMFI9', 'GMFIA')
+    }
+    api, state, _ = _make_api(responses)
+    snapshot = asyncio.run(api.get_all_corners())
+    assert len(snapshot) == 10
+    assert state.corners['UL_V'] == 10
+    assert state.corners['LIN_H'] == 10
+
+
+def test_set_corner_test_grid_on_off():
+    api, _, client = _make_api({})
+    asyncio.run(api.set_corner_test_grid(True))
+    asyncio.run(api.set_corner_test_grid(False))
+    assert client.calls == ['VXX:GMCIA=+00001', 'VXX:GMCIA=+00000']
+
+
+def test_snapshot_includes_geometry_corners_when_non_zero():
+    api, state, _ = _make_api({})
+    state.corners['UL_V'] = 200
+    state.corners['UR_V'] = 0  # ноль — не сохраняется
+    state.corners['LR_H'] = -100
+    snap = api.snapshot_settings_dict()
+    assert 'geometry_corners' in snap
+    assert snap['geometry_corners'] == {'UL_V': 200, 'LR_H': -100}
+
+
+def test_snapshot_omits_geometry_corners_when_all_zero():
+    api, state, _ = _make_api({})
+    state.corners['UL_V'] = 0
+    snap = api.snapshot_settings_dict()
+    assert 'geometry_corners' not in snap
+
+
+def test_apply_saved_settings_restores_corners():
+    """apply_saved_settings должен включить Corner Correction режим
+    и применить все сохранённые offsets."""
+    # Минимальный набор ответов, чтобы дойти до corner-блока без падений
+    responses = {
+        ProjectorCommands.QUERY_LENS_H_POSITION: 'LNSI7=+00000',
+        ProjectorCommands.QUERY_LENS_V_POSITION: 'LNSI8=+00000',
+    }
+    api, state, client = _make_api(responses)
+    state.identity_attempted = True  # пропускаем identity-fetch
+
+    # Заглушка для wait_for_lens_settle, чтобы тест не висел 15 секунд
+    async def _no_settle(*args, **kwargs):
+        return
+    api.wait_for_lens_settle = _no_settle  # type: ignore[assignment]
+
+    settings = {
+        'lens_settings': {'h_position': '---', 'v_position': '---'},
+        'display_settings': {},
+        'geometry_corners': {'UL_V': 100, 'LR_H': -50, 'LIN_V': 5},
+    }
+    asyncio.run(api.apply_saved_settings(settings))
+
+    # Должны увидеть set_geometry → CC + три set_corner
+    assert 'VXX:GMMI0=+00010' in client.calls   # активация Corner Correction
+    assert 'VXX:GMFI1=+00100' in client.calls   # UL_V
+    assert 'VXX:GMFI9=-00050' in client.calls   # LR_H
+    assert 'VXX:GMFI5=+00005' in client.calls   # LIN_V
+
+
+def test_apply_saved_settings_no_corners_section_skips_geometry():
+    """Если geometry_corners не задан — режим Corner Correction не активируется."""
+    responses = {}
+    api, state, client = _make_api(responses)
+    state.identity_attempted = True
+
+    async def _no_settle(*args, **kwargs):
+        return
+    api.wait_for_lens_settle = _no_settle  # type: ignore[assignment]
+
+    settings = {
+        'lens_settings': {'h_position': '---', 'v_position': '---'},
+        'display_settings': {},
+    }
+    asyncio.run(api.apply_saved_settings(settings))
+
+    # set_geometry CC не должен быть отправлен
+    assert 'VXX:GMMI0=+00010' not in client.calls

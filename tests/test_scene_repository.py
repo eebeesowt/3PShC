@@ -49,3 +49,24 @@ def test_settings_payload_roundtrip(tmp_path):
     proj = data["projectors"][0]
     assert proj["position"] == {"x": 5, "y": 7}
     assert proj["settings"] == settings
+
+
+def test_settings_with_geometry_corners_roundtrip(tmp_path):
+    """Сцена с corner correction корректно сохраняется и читается."""
+    settings = {
+        "lens_settings": {"h_position": "+00000", "v_position": "+00000"},
+        "display_settings": {"aspect_ratio": "16:9", "installation_mode": "Front/Desk"},
+        "geometry_corners": {
+            "UL_V": 50, "UR_V": 50,
+            "LL_V": -30, "LR_V": -30,
+            "UL_H": 100, "LR_H": -100,
+        },
+    }
+    path = str(tmp_path / "scene_cc.json")
+    save_scene_to_json(path, (1280, 800), [(_make_projector(), 0, 0, settings)])
+
+    with open(path) as f:
+        data = json.load(f)
+
+    assert data["projectors"][0]["settings"]["geometry_corners"] == \
+        settings["geometry_corners"]

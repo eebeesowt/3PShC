@@ -231,3 +231,17 @@ class Projector:
 
     async def set_geometry(self, mode_name: str) -> None:
         await self._api.set_geometry(mode_name)
+
+    # ----- Corner correction -----
+
+    async def set_corner_offset(self, corner_id: str, value: int) -> None:
+        await self._api.set_corner_offset(corner_id, value)
+
+    async def get_corner_offset(self, corner_id: str) -> Optional[int]:
+        return await self._api.get_corner_offset(corner_id)
+
+    async def get_all_corners(self) -> dict:
+        return await self._api.get_all_corners()
+
+    async def set_corner_test_grid(self, on: bool) -> None:
+        await self._api.set_corner_test_grid(on)

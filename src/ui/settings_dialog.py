@@ -56,6 +56,15 @@ class ProjectorSettingsDialog:
         self._firmware_tag = dpg.generate_uuid()
         self._family_tag = dpg.generate_uuid()
         self._profile_tag = dpg.generate_uuid()
+        # Corner correction
+        self._corner_panel_tag = dpg.generate_uuid()
+        self._corner_step_tag = dpg.generate_uuid()
+        self._corner_grid_tag = dpg.generate_uuid()
+        # 10 read-out лейблов для текущих corner offsets (UL_V, UR_V, ..., LIN_H)
+        self._corner_value_tags: dict = {
+            cid: dpg.generate_uuid()
+            for cid in ProjectorStates.CORNER_REGISTERS
+        }
         self._speed_tag: int = 0
 
         self._build()
@@ -155,8 +164,13 @@ class ProjectorSettingsDialog:
                 default_value="Off",
                 tag=self._geometry_tag,
                 width=200,
-                callback=lambda s, v: self._set_geometry(v),
+                callback=lambda s, v: self._on_geometry_change(v),
             )
+            # Corner correction sub-panel — показывается только когда выбран
+            # режим Corner Correction. configure_item(show=...) — DPG-способ
+            # показывать/прятать без пересборки.
+            with dpg.group(tag=self._corner_panel_tag, show=False):
+                self._build_corner_panel()
             dpg.add_separator()
             dpg.add_text("Test Pattern")
             initial_patterns = list(
@@ -209,6 +223,99 @@ class ProjectorSettingsDialog:
                 "OSD off — убирает меню/баннеры из проекции.",
                 color=Palette.TEXT_MUTED,
             )
+
+    def _build_corner_panel(self) -> None:
+        """2x2 пэд углов + Linearity H/V + Step + чекбокс калибровочной сетки.
+        Sign convention: '↑'/'←' → -step, '↓'/'→' → +step (см. constants.py).
+        """
+        dpg.add_text("Corner Correction", color=Palette.PRIMARY)
+        with dpg.group(horizontal=True):
+            dpg.add_text("Step:")
+            dpg.add_radio_button(
+                items=['1', '10', '50', '100'],
+                default_value='10',
+                tag=self._corner_step_tag,
+                horizontal=True,
+            )
+            dpg.add_spacer(width=20)
+            dpg.add_checkbox(
+                label="Show test grid",
+                tag=self._corner_grid_tag,
+                callback=self._toggle_corner_grid,
+            )
+
+        # 2x2 углов через таблицу
+        with dpg.table(header_row=False,
+                       no_pad_innerX=True, no_pad_outerX=True,
+                       policy=dpg.mvTable_SizingFixedFit):
+            dpg.add_table_column()
+            dpg.add_table_column()
+            with dpg.table_row():
+                self._build_corner_cell('Upper Left',  'UL')
+                self._build_corner_cell('Upper Right', 'UR')
+            with dpg.table_row():
+                self._build_corner_cell('Lower Left',  'LL')
+                self._build_corner_cell('Lower Right', 'LR')
+
+        # Линейность
+        with dpg.group(horizontal=True):
+            dpg.add_text("Linearity V:")
+            self._add_btn("-", lambda: self._adjust_corner('LIN_V', -1), 'info', w=32)
+            self._add_btn("+", lambda: self._adjust_corner('LIN_V', +1), 'info', w=32)
+            dpg.add_text(
+                self._format_value(self.projector.state.corners.get('LIN_V', 0)),
+                tag=self._corner_value_tags['LIN_V'],
+                color=Palette.PRIMARY,
+            )
+            dpg.add_spacer(width=20)
+            dpg.add_text("Linearity H:")
+            self._add_btn("-", lambda: self._adjust_corner('LIN_H', -1), 'info', w=32)
+            self._add_btn("+", lambda: self._adjust_corner('LIN_H', +1), 'info', w=32)
+            dpg.add_text(
+                self._format_value(self.projector.state.corners.get('LIN_H', 0)),
+                tag=self._corner_value_tags['LIN_H'],
+                color=Palette.PRIMARY,
+            )
+
+        reset_btn = dpg.add_button(
+            label="Reset all corners",
+            callback=self._reset_all_corners,
+            width=180, height=26,
+        )
+        dpg.bind_item_theme(reset_btn, ButtonThemes.get('warning'))
+
+    def _build_corner_cell(self, label: str, prefix: str) -> None:
+        """Один угол: лейбл + 4 кнопки (V↑/V↓ и H←/H→) + текущие H/V значения."""
+        v_id, h_id = f"{prefix}_V", f"{prefix}_H"
+        with dpg.group():
+            dpg.add_text(label, color=Palette.TEXT_PRIMARY)
+            with dpg.group(horizontal=True):
+                dpg.add_text("V")
+                self._add_btn("↑", lambda v=v_id: self._adjust_corner(v, -1), 'info', w=32)
+                self._add_btn("↓", lambda v=v_id: self._adjust_corner(v, +1), 'info', w=32)
+                dpg.add_text(
+                    self._format_value(self.projector.state.corners.get(v_id, 0)),
+                    tag=self._corner_value_tags[v_id],
+                    color=Palette.PRIMARY,
+                )
+            with dpg.group(horizontal=True):
+                dpg.add_text("H")
+                self._add_btn("←", lambda h=h_id: self._adjust_corner(h, -1), 'info', w=32)
+                self._add_btn("→", lambda h=h_id: self._adjust_corner(h, +1), 'info', w=32)
+                dpg.add_text(
+                    self._format_value(self.projector.state.corners.get(h_id, 0)),
+                    tag=self._corner_value_tags[h_id],
+                    color=Palette.PRIMARY,
+                )
+
+    @staticmethod
+    def _format_value(v: int) -> str:
+        return f"{v:+d}"
+
+    def _add_btn(self, label, callback, theme, w=40):
+        btn = dpg.add_button(label=label, callback=callback, width=w, height=24)
+        dpg.bind_item_theme(btn, ButtonThemes.get(theme))
+        return btn
 
     def _build_info_tab(self) -> None:
         with dpg.group():
@@ -322,11 +429,63 @@ class ProjectorSettingsDialog:
             f"set test pattern {self.projector.label}",
         )
 
-    def _set_geometry(self, value: str) -> None:
+    def _on_geometry_change(self, value: str) -> None:
+        """Сетит режим геометрии на проекторе и показывает/прячет corner pad."""
         self._run_task(
             self.projector.set_geometry(value),
             f"set geometry {self.projector.label}",
         )
+        is_cc = (value == 'Corner Correction')
+        if dpg.does_item_exist(self._corner_panel_tag):
+            dpg.configure_item(self._corner_panel_tag, show=is_cc)
+        # При активации Corner Correction подтягиваем актуальные offsets, чтобы
+        # текстовые лейблы и логика +/- стартовали с реальных значений.
+        if is_cc:
+            self._run_task(self._async_refresh_corners(), "refresh corners")
+
+    # ---- Corner correction handlers ----
+
+    def _adjust_corner(self, corner_id: str, sign: int) -> None:
+        """+sign шлёт абсолютное value = current + step*sign к проектору.
+        Знак универсальный: ↑/← = -1, ↓/→ = +1 (см. constants.py)."""
+        try:
+            step = int(dpg.get_value(self._corner_step_tag))
+        except (TypeError, ValueError):
+            step = 10
+        delta = sign * step
+        current = self.projector.state.corners.get(corner_id, 0)
+        new_value = current + delta
+
+        async def _run():
+            await self.projector.set_corner_offset(corner_id, new_value)
+            self._update_corner_label(corner_id)
+
+        self._run_task(
+            _run(), f"corner {corner_id} {'+' if sign > 0 else '-'}{step}"
+        )
+
+    def _toggle_corner_grid(self, sender, value: bool) -> None:
+        self._run_task(
+            self.projector.set_corner_test_grid(value),
+            f"corner grid {self.projector.label}",
+        )
+
+    def _reset_all_corners(self) -> None:
+        async def _run():
+            for cid in ProjectorStates.CORNER_REGISTERS:
+                try:
+                    await self.projector.set_corner_offset(cid, 0)
+                except Exception as exc:
+                    logger.warning(f"Reset {cid} failed: {exc}")
+                self._update_corner_label(cid)
+        self._run_task(_run(), f"reset corners {self.projector.label}")
+
+    def _update_corner_label(self, corner_id: str) -> None:
+        tag = self._corner_value_tags.get(corner_id)
+        if tag is None or not dpg.does_item_exist(tag):
+            return
+        value = self.projector.state.corners.get(corner_id, 0)
+        dpg.set_value(tag, f"{value:+d}")
 
     def _set_input(self, value: str) -> None:
         self._run_task(
@@ -495,6 +654,23 @@ class ProjectorSettingsDialog:
         name = ProjectorStates.GEOMETRY_BY_CODE.get(code)
         if name and dpg.does_item_exist(self._geometry_tag):
             dpg.set_value(self._geometry_tag, name)
+        # Если на проекторе уже Corner Correction — показываем corner pad и
+        # подтягиваем актуальные offsets, чтобы +/- стартовали с правильных
+        # значений.
+        is_cc = (name == 'Corner Correction')
+        if dpg.does_item_exist(self._corner_panel_tag):
+            dpg.configure_item(self._corner_panel_tag, show=is_cc)
+        if is_cc:
+            await self._async_refresh_corners()
+
+    async def _async_refresh_corners(self) -> None:
+        try:
+            await self.projector.get_all_corners()
+        except Exception as exc:
+            logger.warning(f"Could not read corners: {exc}")
+            return
+        for cid in ProjectorStates.CORNER_REGISTERS:
+            self._update_corner_label(cid)
 
     # ---- Save / Load ----
 

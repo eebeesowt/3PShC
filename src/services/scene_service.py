@@ -2,11 +2,13 @@
 Сервис сцен: оркестрация load/save поверх scene_repository и Projector.
 
 Нюанс: при сохранении делает live-снимок состояния каждого проектора
-(get_lens_position + get_aspect_ratio + get_installation_mode) и собирает
-итоговый dict через ProjectorApi.snapshot_settings_dict.
+(get_lens_position + get_aspect_ratio + get_installation_mode + опционально
+get_geometry/get_all_corners) и собирает итоговый dict через
+ProjectorApi.snapshot_settings_dict.
 """
 from typing import List, Optional, Tuple
 
+from core.constants import ProjectorStates
 from infra.scene_repository import load_scene, save_scene_to_json
 from infra.settings_repository import create_projector_settings_dict
 from services.projector import Projector
@@ -52,6 +54,18 @@ class SceneService:
             await projector.get_lens_position()
             await projector.get_aspect_ratio()
             await projector.get_installation_mode()
+            # Если на проекторе сейчас режим Corner Correction — снимаем
+            # текущие 10 corner-offsets, чтобы они попали в JSON. В других
+            # режимах это бесполезно (offsets всё равно не применяются).
+            try:
+                geom_code = await projector.get_geometry()
+                cc_code = ProjectorStates.GEOMETRY_MODES.get('Corner Correction')
+                if geom_code == cc_code:
+                    await projector.get_all_corners()
+            except Exception as exc:
+                logger.warning(
+                    f"Could not read geometry/corners for {projector.label}: {exc}"
+                )
             return projector.api.snapshot_settings_dict()
         except Exception as exc:
             logger.warning(
