@@ -9,6 +9,9 @@ tmp/
 venv/
 .env.local
 
+.omc/
+.DS_Store
+
 # Ignore IDE specific files
 .vscode/
 .idea/

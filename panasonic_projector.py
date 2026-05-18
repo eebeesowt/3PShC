@@ -63,7 +63,7 @@ class Projector:
     def __init__(self, ip: str, login: str, password: str,
                  port: int = DEFAULT_PORT,
                  timeout: float = DEFAULT_TIMEOUT,
-                 label: str = None) -> None:
+                 label: str = 'None') -> None:
         self.ip = ip
         self.port = port
         self.login = login
